@@ -55,10 +55,13 @@ function IndexContent() {
   const [zonesByColor, setZonesByColor] = useState<Map<number, Zone[]>>(
     new Map()
   );
-  const [selectedColorIdx, setSelectedColorIdx] = useState<number | null>(null);
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
 
   const { width = 0, height = 0 } = useWindowSize() ?? {};
+
+  useEffect(() => () => {
+    if (selectedImageUrl?.startsWith("blob:")) URL.revokeObjectURL(selectedImageUrl);
+  }, [selectedImageUrl]);
 
   useEffect(() => {
     if (!selectedImageUrl) {
@@ -73,6 +76,42 @@ function IndexContent() {
     image.src = selectedImageUrl;
     return () => { image.onload = null; };
   }, [selectedImageUrl]);
+
+  const currentProjectUrl = studio.currentProject?.imageUrl;
+  const currentProjectFile = studio.currentProject?.imageFile;
+  useEffect(() => {
+    if (currentProjectUrl) {
+      setSelectedImageUrl(currentProjectUrl);
+      lastFileRef.current = currentProjectFile ?? null;
+    }
+  }, [currentProjectUrl, currentProjectFile]);
+
+  useEffect(() => {
+    if (!studio.result) { setZonesByColor(new Map()); return; }
+    const grouped = new Map<number, Zone[]>();
+    const totalPixels = Math.max(1, (studio.result.metadata?.width ?? studio.result.colorized?.width ?? 1) * (studio.result.metadata?.height ?? studio.result.colorized?.height ?? 1));
+    for (const zone of studio.result.zones) {
+      const list = grouped.get(zone.colorIdx) ?? [];
+      list.push({ ...zone, hex: studio.result.palette[zone.colorIdx], percent: zone.area / totalPixels * 100 });
+      grouped.set(zone.colorIdx, list);
+    }
+    setZonesByColor(grouped);
+  }, [studio.result]);
+
+  const resetImage = () => {
+    if (processingLock.current) return;
+    documentRevision.current += 1;
+    lastFileRef.current = null;
+    setSelectedImageUrl(null);
+    setImageDimensions(null);
+    studio.setSelectedColorIdx(null);
+    setZonesByColor(new Map());
+    studio.setResult(null);
+    studio.setAnalysis(null);
+    studio.setRecommendations(null);
+    studio.setCurrentProject(null);
+    studio.setViewMode("original");
+  };
 
   // ========== IMAGE SELECTION ==========
   const handleImageSelect = async (file: File) => {
@@ -129,7 +168,7 @@ function IndexContent() {
       setShowAnalysisDialog(false);
       studio.updateSettings(resetSettings);
       setZonesByColor(new Map());
-      setSelectedColorIdx(null);
+      studio.setSelectedColorIdx(null);
 
       toast.success("Image chargée (aperçu)", {
         description: "Normalisation en cours…",
@@ -260,6 +299,7 @@ function IndexContent() {
       {/* Confettis */}
       {showConfetti && (
         <Confetti
+          style={{ pointerEvents: "none" }}
           width={width}
           height={height}
           recycle={false}
@@ -285,6 +325,8 @@ function IndexContent() {
             <ImageUpload
               onImageSelect={handleImageSelect}
               selectedImage={selectedImageUrl}
+              currentFile={studio.currentProject?.imageFile}
+              onReset={resetImage}
             />
 
             <div className="mt-2 flex gap-2">
@@ -328,6 +370,7 @@ function IndexContent() {
             </Dialog>
 
             <AiSuggestionsCard
+              key={studio.currentProject?.id ?? "no-image"}
               analysis={studio.analysis}
               recommendations={studio.recommendations}
               onApply={(settings) => {
@@ -415,12 +458,12 @@ function IndexContent() {
           <>
             {studio.result && (
               <>
-                <ColorPalette colors={studio.result.palette} />
+                <ColorPalette colors={studio.result.palette} onColorSelect={studio.setSelectedColorIdx} />
                 {zonesByColor.size > 0 && (
                   <PalettePanel
                     zonesByColor={zonesByColor}
-                    selectedColorIdx={selectedColorIdx}
-                    onColorSelect={setSelectedColorIdx}
+                    selectedColorIdx={studio.selectedColorIdx}
+                    onColorSelect={studio.setSelectedColorIdx}
                   />
                 )}
                 <details className="atelier-debug"><summary>Analyse détaillée du modèle</summary><DebugPanel processedData={studio.result} /></details>

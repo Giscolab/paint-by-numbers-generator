@@ -4,6 +4,7 @@ import { useStudio } from "@/contexts/StudioContext";
 import { Zone } from "@/lib/imageProcessing";
 import { Maximize2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import { useCanvasViewport } from "./CanvasViewport";
 
 interface InspectionOverlayProps {
@@ -31,7 +32,7 @@ export function InspectionOverlay({
   width,
   height,
 }: InspectionOverlayProps) {
-  const { panTool } = useStudio();
+  const { panTool, colorPicking, setColorPicking, selectedColorIdx, setSelectedColorIdx, focusedZone, overlay } = useStudio();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const { clientToImage, dpr, wrapperRef, overlayRef } = useCanvasViewport();
 
@@ -39,6 +40,9 @@ export function InspectionOverlay({
   const [mouseClient, setMouseClient] = useState<{ x: number; y: number } | null>(null);
   const [mouseImg, setMouseImg] = useState<{ x: number; y: number } | null>(null);
   const [selectedZone, setSelectedZone] = useState<number | null>(null);
+  useEffect(() => {
+    if (focusedZone) setSelectedZone(focusedZone.id);
+  }, [focusedZone]);
 
   // Cache offscreen de l'image source (pour dessiner net à n'importe quelle taille)
   const offscreen = useMemo(() => {
@@ -55,7 +59,7 @@ export function InspectionOverlay({
   // Masque de surbrillance (généré à la première sélection ou changement de zone)
   const [highlightCanvas, setHighlightCanvas] = useState<HTMLCanvasElement | null>(null);
   useEffect(() => {
-    if (!labels || !palette || selectedZone == null) {
+    if (!labels || !palette || (selectedZone == null && selectedColorIdx == null)) {
       setHighlightCanvas(null);
       return;
     }
@@ -69,24 +73,24 @@ export function InspectionOverlay({
     const img = ctx.createImageData(width, height);
     const data = img.data;
 
-    // Couleur = couleur de la zone (ou fallback blanc)
-    const zone = zones.find((z) => z.id === selectedZone);
+    // A clicked zone takes priority; a palette selection highlights all zones of that color.
+    const zone = zones.find((z) => z.id === selectedZone) ?? zones.find(z => z.colorIdx === selectedColorIdx);
     const colorHex = zone ? palette[zone.colorIdx] : "#ffffff";
+    const matchingIds = new Set(zones.filter(z => selectedColorIdx != null ? z.colorIdx === selectedColorIdx : z.id === selectedZone).map(z => z.id));
     const { r, g, b } = hexToRgb(colorHex);
 
     for (let i = 0; i < labels.length; i++) {
-      if (labels[i] === selectedZone) {
+      if (matchingIds.has(labels[i])) {
         const j = i * 4;
         data[j] = r;
         data[j + 1] = g;
         data[j + 2] = b;
-        data[j + 3] = 90; // alpha ~35%
-				if (Math.random() < 0.01) data[j + 3] = 110;
+        data[j + 3] = Math.round(255 * overlay.opacity / 100);
       }
     }
     ctx.putImageData(img, 0, 0);
     setHighlightCanvas(c);
-  }, [labels, palette, zones, selectedZone, width, height]);
+  }, [labels, palette, zones, selectedZone, selectedColorIdx, overlay.opacity, width, height]);
 
   useEffect(() => {
     const cnv = canvasRef.current;
@@ -168,9 +172,25 @@ export function InspectionOverlay({
     if (!labels) return;
     const pt = clientToImage(e.clientX, e.clientY);
     if (!pt) return;
+    if (pt.x < 0 || pt.x >= width || pt.y < 0 || pt.y >= height) return;
     const idx = pt.y * width + pt.x;
     const zoneId = labels[idx];
-    setSelectedZone((z) => (z === zoneId ? null : zoneId));
+    const zone = zones.find(z => z.id === zoneId);
+    if (!zone) return;
+    setSelectedZone(zoneId);
+    setSelectedColorIdx(zone.colorIdx);
+    if (colorPicking) {
+      setColorPicking(false);
+      const hex = palette[zone.colorIdx];
+      if (hex) {
+        if (navigator.clipboard?.writeText) {
+          void navigator.clipboard.writeText(hex).then(() => toast.success("Couleur copiée : " + hex))
+            .catch(() => toast.info("Couleur sélectionnée : " + hex));
+        } else {
+          toast.info("Couleur sélectionnée : " + hex);
+        }
+      }
+    }
   };
 
   // Infos zone sous la souris
@@ -200,7 +220,7 @@ export function InspectionOverlay({
     const left = clamp(localX + 12, 8, Math.max(8, rect.width - TW - 8));
     const top = clamp(localY - TH - 8, 8, Math.max(8, rect.height - TH - 8));
     return { left, top };
-  }, [mouseClient]);
+  }, [mouseClient, wrapperRef]);
 
   if (!imageData) return null;
 

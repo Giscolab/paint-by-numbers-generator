@@ -200,6 +200,14 @@ export function EnhancedViewTabs({ originalImage, processedData }: EnhancedViewT
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
   }, []);
 
+  useEffect(() => {
+    if (studio.viewMode !== "numbered" || !studio.focusedZone) return;
+    const frame = requestAnimationFrame(() => {
+      viewportRef.current?.centerOn(studio.focusedZone!.x, studio.focusedZone!.y);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [studio.viewMode, studio.focusedZone]);
+
   const handleZoomIn = useCallback(() => {
     viewportRef.current?.zoomIn();
   }, []);
@@ -490,6 +498,7 @@ export function EnhancedViewTabs({ originalImage, processedData }: EnhancedViewT
                   onZoomIn={handleZoomIn}
                   onZoomOut={handleZoomOut}
                   onTogglePan={studio.togglePanTool}
+                  panTool={studio.panTool}
                   onPickColor={studio.pickColor}
                   numberedVisible={studio.overlay.numbered}
                   onToggleNumbered={(v) => studio.setOverlay({ ...studio.overlay, numbered: v })}
@@ -680,6 +689,22 @@ export function EnhancedViewTabs({ originalImage, processedData }: EnhancedViewT
 
                     </div>
                   </CanvasViewport>
+                  <CanvasHUD
+                    zoomPercent={studio.zoomPercent}
+                    canZoomIn={studio.zoomPercent < 800}
+                    canZoomOut={studio.zoomPercent > 10}
+                    onZoomIn={handleZoomIn}
+                    onZoomOut={handleZoomOut}
+                    onTogglePan={studio.togglePanTool}
+                    panTool={studio.panTool}
+                    onPickColor={studio.pickColor}
+                    numberedVisible={studio.overlay.numbered}
+                    onToggleNumbered={value => studio.setOverlay({ ...studio.overlay, numbered: value })}
+                    overlayOpacity={studio.overlay.opacity}
+                    onChangeOverlayOpacity={value => studio.setOverlay({ ...studio.overlay, opacity: value })}
+                    onFindNumber={studio.findZoneByNumber}
+                    showNumberControls
+                  />
                 </div>
               </div> :
             numberedUrl ?

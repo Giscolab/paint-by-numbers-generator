@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { clampPan, clampZoom, clientPointToImage, fitZoom } from '@/lib/viewportGeometry';
 
 type ScrollState = {left:number;top:number};
-export interface CanvasViewportHandle { zoomIn:()=>void; zoomOut:()=>void; zoomTo:(percent:number,anchor?:{x:number;y:number})=>void; reset:()=>void; fitToScreen:()=>void; center:()=>void; clientToImage:(x:number,y:number)=>{x:number;y:number}|null; }
+export interface CanvasViewportHandle { zoomIn:()=>void; zoomOut:()=>void; zoomTo:(percent:number,anchor?:{x:number;y:number})=>void; reset:()=>void; fitToScreen:()=>void; center:()=>void; centerOn:(x:number,y:number)=>void; clientToImage:(x:number,y:number)=>{x:number;y:number}|null; }
 export interface CanvasViewportProps { width:number; height:number; zoomPercent:number; onZoomChange:(percent:number)=>void; panTool?:boolean; initialScroll?:ScrollState; onScrollChange?:(state:ScrollState)=>void; className?:string; children:ReactNode; }
 interface CanvasViewportContextValue { scale:number; dpr:number; imageWidth:number; imageHeight:number; containerRef:RefObject<HTMLDivElement>; overlayRef:RefObject<HTMLDivElement>; wrapperRef:RefObject<HTMLDivElement>; clientToImage:(x:number,y:number)=>{x:number;y:number}|null; }
 const CanvasViewportContext=createContext<CanvasViewportContextValue|null>(null);
@@ -29,8 +29,11 @@ export const CanvasViewport=forwardRef<CanvasViewportHandle,CanvasViewportProps>
   const zoomOut=useCallback(()=>zoomTo(zoomPercent/1.2),[zoomPercent,zoomTo]);
   const reset=useCallback(()=>{setPan({x:0,y:0});zoomTo(100);},[zoomTo]);
   const center=useCallback(()=>setPan({x:0,y:0}),[]);
+  const centerOn=useCallback((x:number,y:number)=>{
+    setPan({x:clampPan((width/2-x)*scale,width*scale,size.width),y:clampPan((height/2-y)*scale,height*scale,size.height)});
+  },[width,height,scale,size.width,size.height]);
   const clientToImage=useCallback((x:number,y:number)=>{const rect=containerRef.current?.getBoundingClientRect();return rect?clientPointToImage(x,y,rect,{width,height,containerWidth:size.width,containerHeight:size.height,scale,panX:actualPan.x,panY:actualPan.y}):null;},[width,height,size.width,size.height,scale,actualPan.x,actualPan.y]);
-  useImperativeHandle(ref,()=>({zoomIn,zoomOut,zoomTo,reset,fitToScreen,center,clientToImage}),[zoomIn,zoomOut,zoomTo,reset,fitToScreen,center,clientToImage]);
+  useImperativeHandle(ref,()=>({zoomIn,zoomOut,zoomTo,reset,fitToScreen,center,centerOn,clientToImage}),[zoomIn,zoomOut,zoomTo,reset,fitToScreen,center,centerOn,clientToImage]);
   useEffect(()=>onScrollChange?.({left:actualPan.x,top:actualPan.y}),[actualPan.x,actualPan.y,onScrollChange]);
   // Native non-passive wheel handler: Ctrl/Cmd+wheel zooms; plain wheel pans the artwork.
   useEffect(()=>{

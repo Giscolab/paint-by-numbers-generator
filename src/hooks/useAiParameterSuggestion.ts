@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { ColorAnalysis, Recommendations } from "@/lib/imageProcessing";
 import type { StudioSettings } from "@/contexts/StudioContext";
+import { suggestParametersLocally } from "@/lib/localParameterSuggestion";
 
 export type SuggestionDifficulty = "debutant" | "intermediaire" | "expert";
 
@@ -20,6 +21,7 @@ export type SuggestedSettings = Pick<
 >;
 
 export interface ParameterSuggestion {
+  source?: "ia" | "local";
   difficulty: SuggestionDifficulty;
   settings: SuggestedSettings;
   summary: string;
@@ -71,6 +73,18 @@ export function useAiParameterSuggestion() {
     ): Promise<ParameterSuggestion | null> => {
       setIsLoading(true);
       setError(null);
+      setSuggestion(null);
+
+      const fallback = (message: string): ParameterSuggestion => {
+        const result: ParameterSuggestion = {
+          ...suggestParametersLocally(analysis, recommendations, difficulty),
+          difficulty,
+          source: "local",
+        };
+        setError(message + " Une suggestion locale est proposée à la place.");
+        setSuggestion(result);
+        return result;
+      };
 
       try {
         const { data, error: fnError } = await supabase.functions.invoke(
@@ -90,24 +104,21 @@ export function useAiParameterSuggestion() {
               ? "Trop de requêtes IA, réessayez dans un instant."
               : (fnError as { context?: { status?: number } }).context?.status === 402
               ? "Crédits IA épuisés."
-              : fnError.message || "Le service IA est indisponible.";
-          setError(message);
-          return null;
+              : "Le service IA est temporairement indisponible.";
+          return fallback(message);
         }
 
         if (!data || (data as { error?: string }).error) {
           const message = (data as { error?: string })?.error ?? "Réponse IA invalide.";
-          setError(message);
-          return null;
+          return fallback(message);
         }
 
-        const result = data as ParameterSuggestion;
+        const result: ParameterSuggestion = { ...(data as ParameterSuggestion), source: "ia" };
         setSuggestion(result);
         return result;
       } catch (err) {
         console.error("useAiParameterSuggestion", err);
-        setError("Impossible de contacter le service IA.");
-        return null;
+        return fallback("Impossible de contacter le service IA.");
       } finally {
         setIsLoading(false);
       }

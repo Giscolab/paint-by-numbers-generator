@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import type { SavedProjectSummary } from "@/lib/projectStore";
 import { Layers, Download, FileArchive, ChevronDown, FolderOpen, Save, CheckCheck } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useStudio } from "@/contexts/StudioContext";
@@ -25,6 +26,29 @@ import { saveAs } from "file-saver";
 export const Header = ({ onImport }: { onImport?: () => void }) => {
   const studio = useStudio();
   const [isExporting, setIsExporting] = useState(false);
+  const [savedProjects, setSavedProjects] = useState<SavedProjectSummary[]>([]);
+  const [projectBusy, setProjectBusy] = useState(false);
+  const refreshProjects = async () => {
+    try { setSavedProjects(await studio.getSavedProjects()); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Stockage local inaccessible."); }
+  };
+  const saveCurrentProject = async () => {
+    setProjectBusy(true);
+    try { await studio.saveProject(studio.currentProject?.name || "Mon projet"); await refreshProjects(); toast.success("Projet enregistré et réouvrable localement."); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Enregistrement impossible."); }
+    finally { setProjectBusy(false); }
+  };
+  const openSavedProject = async (id: string) => {
+    setProjectBusy(true);
+    try { await studio.loadProject(id); toast.success("Projet restauré."); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Restauration impossible."); }
+    finally { setProjectBusy(false); }
+  };
+  const removeSavedProject = async (project: SavedProjectSummary) => {
+    if (!window.confirm("Supprimer définitivement le projet enregistré « " + project.name + " » ?")) return;
+    try { await studio.deleteProject(project.id); await refreshProjects(); toast.success("Projet supprimé du stockage local."); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Suppression impossible."); }
+  };
 
   const handleQuickExport = async () => {
     try {
@@ -94,17 +118,37 @@ export const Header = ({ onImport }: { onImport?: () => void }) => {
       <div className="atelier-header-inner">
         <div className="atelier-brand"><span className="atelier-brand-icon"><Layers size={20}/></span><h1>canvas<span> to </span>colors</h1><span className="atelier-brand-badge">STUDIO</span></div>
         <nav aria-label="Menu principal" className="atelier-header-nav">
-          <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="sm">Fichier</Button></DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem onClick={onImport}><FolderOpen className="mr-2 h-4 w-4"/>Importer une image</DropdownMenuItem><DropdownMenuItem disabled={!studio.result} onClick={() => { try { studio.saveProject(studio.currentProject?.name || "Mon projet"); toast.success("Projet enregistré localement."); } catch (error) { toast.error(error instanceof Error ? error.message : "Impossible d’enregistrer ce projet."); } }}><Save className="mr-2 h-4 w-4"/>Enregistrer le projet localement</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
-          <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="sm">Affichage</Button></DropdownMenuTrigger><DropdownMenuContent>{([['original','Original'],['colorized','Couleurs'],['contours','Contours'],['numbered','Numéros'],['compare','Comparer']] as const).map(([mode,label])=><DropdownMenuItem key={mode} disabled={mode !== 'original' && !studio.result} onClick={()=>studio.setViewMode(mode)}>{label}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>
+          <DropdownMenu onOpenChange={(open) => { if (open) void refreshProjects(); }}>
+            <DropdownMenuTrigger asChild><Button variant="ghost" size="sm">Fichier</Button></DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="max-h-[70vh] min-w-72 overflow-y-auto">
+              <DropdownMenuItem onClick={onImport}><FolderOpen className="mr-2 h-4 w-4" />Importer une image</DropdownMenuItem>
+              <DropdownMenuItem disabled={!studio.result || projectBusy} onClick={() => { void saveCurrentProject(); }}><Save className="mr-2 h-4 w-4" />Enregistrer le projet localement</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <div className="px-2 py-1 text-xs text-muted-foreground">Projets enregistrés sur cet appareil</div>
+              {savedProjects.length === 0 ? <DropdownMenuItem disabled>Aucun projet enregistré</DropdownMenuItem> :
+                savedProjects.map(project => <DropdownMenuItem key={project.id} disabled={projectBusy} onClick={() => { void openSavedProject(project.id); }}>
+                  <FolderOpen className="mr-2 h-4 w-4 shrink-0" /><span className="max-w-[220px] truncate">{project.name}</span>
+                </DropdownMenuItem>)}
+              {savedProjects.length > 0 && <><DropdownMenuSeparator />
+                <div className="px-2 py-1 text-xs text-muted-foreground">Supprimer un projet enregistré</div>
+                {savedProjects.map(project => <DropdownMenuItem key={"delete-" + project.id} className="text-destructive" onClick={() => { void removeSavedProject(project); }}>Supprimer : {project.name}</DropdownMenuItem>)}
+              </>}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => studio.updatePreferences({ autoSave: !studio.preferences.autoSave })}>
+                {studio.preferences.autoSave ? "☑" : "☐"} Sauvegarde automatique (2 min)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="sm" className="hidden sm:inline-flex">Affichage</Button></DropdownMenuTrigger><DropdownMenuContent>{([['original','Original'],['colorized','Couleurs'],['contours','Contours'],['numbered','Numéros'],['compare','Comparer']] as const).map(([mode,label])=><DropdownMenuItem key={mode} disabled={mode !== 'original' && !studio.result} onClick={()=>studio.setViewMode(mode)}>{label}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>
         </nav>
         {/* Zone droite : actions + theme toggle */}
         <div className="ml-auto flex items-center gap-2">
-          <span className="atelier-local-status"><CheckCheck size={13}/>Traitement local</span>
+          <span className="atelier-local-status"><CheckCheck size={13}/>Traitement d’image local</span>
           {/* Export rapide PNG */}
           <Button
             size="sm"
             variant="outline"
-            className="gap-2"
+            className="hidden sm:inline-flex gap-2"
             onClick={handleQuickExport}
             title="Exporter la version colorisée en PNG (x2)"
             disabled={!studio.result}

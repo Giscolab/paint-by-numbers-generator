@@ -392,7 +392,7 @@ export const ParametersPanel = ({
 
       {/* SECTION: Effets artistiques (AI) */}
       <Section
-        title="Effets artistiques (AI)"
+        title="Effets artistiques"
         icon={<PaintBucket className="h-3.5 w-3.5" />}
         summaryHelp="Filtres style huile/crayon et intensité"
         defaultOpen={false}

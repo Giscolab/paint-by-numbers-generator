@@ -84,6 +84,7 @@ export function useArtisticEffects(
 
   useEffect(() => {
     if (!source) {
+      requestIdRef.current += 1; // discard any result from a previous image
       setState({ imageData: null, isApplying: false, error: null, durationMs: null });
       return;
     }
@@ -98,13 +99,13 @@ export function useArtisticEffects(
       return;
     }
 
+    const requestId = ++requestIdRef.current; // invalidate in-flight previews immediately
     setState((prev) => ({ ...prev, isApplying: true, error: null }));
 
     const timer = window.setTimeout(() => {
       const worker = workerRef.current;
       if (!worker) return;
 
-      const requestId = ++requestIdRef.current;
       const copy = new Uint8ClampedArray(source.data); // copie: la source reste intacte
 
       worker.postMessage(

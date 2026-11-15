@@ -5,12 +5,15 @@ import {
   useCallback,
   ReactNode,
   useEffect,
+  useRef,
 } from "react";
 import { toast } from "sonner";
 import { ProcessedResult, ColorAnalysis, Recommendations } from "@/lib/imageProcessing";
 import { useProfiler } from "@/hooks/useProfiler";
 import type { PaintEffectType } from "@/lib/postProcessing";
-import type { ArtisticEffectType } from "@/lib/artisticEffects";
+import { applyArtisticEffect, type ArtisticEffectType } from "@/lib/artisticEffects";
+import { applyPaintEffect } from "@/lib/postProcessing";
+import { deleteStoredProject, listStoredProjects, loadStoredProject, saveStoredProject, type SavedProjectSummary } from "@/lib/projectStore";
 
 // Note: Pour la fonctionnalité d'export ZIP, vous devrez installer ces dépendances:
 // npm install jszip file-saver
@@ -102,10 +105,10 @@ export interface StudioContextValue {
   updatePreferences: (prefs: Partial<UserPreferences>) => void;
 
   // --- Gestion projets ---
-  saveProject: (name: string) => void;
-  loadProject: (projectId: string) => void;
-  deleteProject: (projectId: string) => void;
-  getSavedProjects: () => Project[];
+  saveProject: (name: string) => Promise<void>;
+  loadProject: (projectId: string) => Promise<void>;
+  deleteProject: (projectId: string) => Promise<void>;
+  getSavedProjects: () => Promise<SavedProjectSummary[]>;
 
   // --- Performance profiler ---
   profiler: ReturnType<typeof useProfiler>;
@@ -118,7 +121,12 @@ export interface StudioContextValue {
   resetZoom: () => void;
   panTool: boolean;
   togglePanTool: () => void; // mode "main" (pan) visuel
-  pickColor?: () => void; // pipette (optionnel)
+  pickColor: () => void;
+  colorPicking: boolean;
+  setColorPicking: (value: boolean) => void;
+  selectedColorIdx: number | null;
+  setSelectedColorIdx: (value: number | null) => void;
+  focusedZone: { id: number; x: number; y: number; nonce: number } | null;
 
   overlay: OverlayState;
   setOverlay: (s: OverlayState) => void;
@@ -199,6 +207,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [analysis, setAnalysis] = useState<ColorAnalysis | null>(null);
   const [recommendations, setRecommendations] = useState<Recommendations | null>(null);
   const [result, setResult] = useState<ProcessedResult | null>(null);
+  const effectCache = useRef<{ source: ImageData; key: string; image: ImageData } | null>(null);
   const [settings, setSettings] = useState<StudioSettings>(DEFAULT_SETTINGS);
   const [isProcessing, setIsProcessing] = useState(false);
   const profiler = useProfiler();
@@ -224,24 +233,35 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const resetZoom = useCallback(() => {
     _setZoomPercent(100);
   }, []);
-  const pickColor = undefined; // hook pipette si tu veux plus tard
+  const [colorPicking, setColorPicking] = useState(false);
+  const [selectedColorIdx, setSelectedColorIdx] = useState<number | null>(null);
+  const [focusedZone, setFocusedZone] = useState<{ id: number; x: number; y: number; nonce: number } | null>(null);
+  const pickColor = useCallback(() => {
+    if (!result) { toast.error("Générez d’abord un modèle pour utiliser la pipette."); return; }
+    setColorPicking(true);
+    setViewMode("numbered");
+    toast.info("Cliquez sur une zone pour copier sa couleur.");
+  }, [result]);
 
   const [overlay, setOverlay] = useState<OverlayState>({
     numbered: true,
     opacity: 60,
   });
 
-  const findZoneByNumber = useCallback(
-    (n: number) => {
-      const labels = result?.labels;
-      if (!labels) return;
-      const target = result?.zones.find(zone => zone.colorIdx + 1 === n);
-      if (target) {
-        console.info("[Studio] Zone trouvée:", target);
-      }
-    },
-    [result]
-  );
+  const findZoneByNumber = useCallback((n: number) => {
+    if (!result) return;
+    if (!Number.isInteger(n) || n < 1 || n > result.palette.length) {
+      toast.error("Numéro de couleur inexistant.");
+      return;
+    }
+    const target = result.zones.filter(zone => zone.colorIdx + 1 === n)
+      .sort((a, b) => b.area - a.area)[0];
+    if (!target) { toast.error("Aucune zone trouvée pour ce numéro."); return; }
+    setSelectedColorIdx(target.colorIdx);
+    setFocusedZone({ id: target.id, x: target.centroid.x, y: target.centroid.y, nonce: Date.now() });
+    setViewMode("numbered");
+    toast.success("Zone « " + n + " » localisée et sélectionnée.");
+  }, [result]);
 
 // ---------------------------------------------
 // Fonction de rendu sur Canvas (corrigée et centrée)
@@ -289,12 +309,28 @@ const renderToCanvas = useCallback((
       break;
     case "colorized":
       img = colorized;
+      if (img) {
+        const key = [settings.paintEffect, settings.paintIntensity, settings.artisticEffect, settings.artisticIntensity].join(":");
+        if (effectCache.current?.source === img && effectCache.current.key === key) {
+          img = effectCache.current.image;
+        } else {
+          let output = img;
+          if (settings.paintEffect !== "none" && settings.paintIntensity > 0) {
+            output = applyPaintEffect(output, { type: settings.paintEffect, intensity: settings.paintIntensity });
+          }
+          if (settings.artisticEffect !== "none" && settings.artisticIntensity > 0) {
+            output = applyArtisticEffect(output, { type: settings.artisticEffect, intensity: settings.artisticIntensity });
+          }
+          effectCache.current = { source: img, key, image: output };
+          img = output;
+        }
+      }
       break;
     case "contours":
       img = contours;
       break;
     case "numbered":
-      img = numbered ?? colorized;
+      img = numbered;
       break;
     case "compare":
       img = colorized;
@@ -339,7 +375,7 @@ const renderToCanvas = useCallback((
   }
 
   return canvas;
-}, [result, settings.watermarkEnabled, settings.watermarkText]);
+}, [result, settings.paintEffect, settings.paintIntensity, settings.artisticEffect, settings.artisticIntensity, settings.watermarkEnabled, settings.watermarkText]);
 
 
 
@@ -425,7 +461,7 @@ const renderToCanvas = useCallback((
     if (viewMode !== preferences.lastViewMode) {
       setPreferences((prev) => ({ ...prev, lastViewMode: viewMode }));
     }
-  }, [viewMode]);
+  }, [viewMode, preferences.lastViewMode]);
 
   // ---------------------------------------------
   // Actions
@@ -449,65 +485,44 @@ const renderToCanvas = useCallback((
     }));
   }, [recommendations]);
 
-  const getSavedProjects = useCallback((): Project[] => {
-    try {
-      const stored = localStorage.getItem("pbn-projects");
-      return stored ? JSON.parse(stored) : [];
-    } catch (error) {
-      console.error("Error loading projects:", error);
-      return [];
-    }
+  const getSavedProjects = useCallback(() => listStoredProjects(), []);
+
+  const saveProject = useCallback(async (name: string) => {
+    const imageFile = currentProject?.imageFile;
+    if (!currentProject || !imageFile || !result) throw new Error("Importez et générez une image avant de l’enregistrer.");
+    const projectName = name.trim() || currentProject.name || "Sans titre";
+    await saveStoredProject({
+      id: currentProject.id, name: projectName, timestamp: Date.now(), imageFile,
+      sourceType: currentProject.sourceType, settings, analysis: analysis ?? undefined,
+      recommendations: recommendations ?? undefined, result,
+    });
+    setCurrentProject(previous => previous?.id === currentProject.id ? { ...previous, name: projectName } : previous);
+  }, [currentProject, result, settings, analysis, recommendations]);
+
+  const loadProject = useCallback(async (projectId: string) => {
+    const project = await loadStoredProject(projectId);
+    if (!project) throw new Error("Ce projet n’existe plus dans le stockage local.");
+    if (!project.imageFile || !project.result) throw new Error("Projet incomplet : impossible de restaurer les rendus.");
+    const imageUrl = URL.createObjectURL(project.imageFile);
+    setCurrentProject({
+      id: project.id, name: project.name, timestamp: project.timestamp,
+      imageFile: project.imageFile, imageUrl, sourceType: project.sourceType,
+      settings: project.settings, analysis: project.analysis,
+      recommendations: project.recommendations, result: project.result,
+    });
+    setSettings({ ...DEFAULT_SETTINGS, ...project.settings });
+    setAnalysis(project.analysis ?? null);
+    setRecommendations(project.recommendations ?? null);
+    setResult(project.result);
+    setSelectedColorIdx(null);
+    setFocusedZone(null);
+    setColorPicking(false);
+    setViewMode("colorized");
   }, []);
 
-  const saveProject = useCallback(
-    (name: string) => {
-      if (!currentProject?.imageUrl || !result) {
-        throw new Error("No project to save");
-      }
-
-      const project: Project = {
-        id: Date.now().toString(),
-        name: name.trim(),
-        timestamp: Date.now(),
-        imageUrl: currentProject.imageUrl,
-        sourceType: currentProject.sourceType,
-        settings,
-        analysis: analysis || undefined,
-        recommendations: recommendations || undefined,
-        result,
-      };
-
-      const projects = getSavedProjects();
-      const updated = [...projects, project];
-      localStorage.setItem("pbn-projects", JSON.stringify(updated));
-    },
-    [currentProject, result, settings, analysis, getSavedProjects]
-  );
-
-  const loadProject = useCallback(
-    (projectId: string) => {
-      const projects = getSavedProjects();
-      const project = projects.find((p) => p.id === projectId);
-
-      if (project) {
-        setCurrentProject(project);
-        setSettings({ ...DEFAULT_SETTINGS, ...project.settings });
-        setAnalysis(project.analysis || null);
-        setRecommendations(project.recommendations || null);
-        setResult(project.result || null);
-      }
-    },
-    [getSavedProjects]
-  );
-
-  const deleteProject = useCallback(
-    (projectId: string) => {
-      const projects = getSavedProjects();
-      const updated = projects.filter((p) => p.id !== projectId);
-      localStorage.setItem("pbn-projects", JSON.stringify(updated));
-    },
-    [getSavedProjects]
-  );
+  const deleteProject = useCallback(async (projectId: string) => {
+    await deleteStoredProject(projectId);
+  }, []);
 
   // ---------------------------------------------
   // Valeur exposée
@@ -546,6 +561,11 @@ const renderToCanvas = useCallback((
     panTool: isPanMode,
     togglePanTool,
     pickColor,
+    colorPicking,
+    setColorPicking,
+    selectedColorIdx,
+    setSelectedColorIdx,
+    focusedZone,
     overlay,
     setOverlay,
     findZoneByNumber,

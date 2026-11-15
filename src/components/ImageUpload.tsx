@@ -12,13 +12,15 @@ import { WebcamCapture } from "@/components/WebcamCapture";
 interface ImageUploadProps {
   onImageSelect: (file: File) => void;
   selectedImage: string | null;
+  currentFile?: File | null;
+  onReset?: () => void;
 }
 
-const ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/svg+xml"];
+const ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/webp", "image/svg+xml"];
 const isSupportedFile = (file: File) =>
   ACCEPTED_TYPES.includes(file.type) || file.name.toLowerCase().endsWith(".svg");
 
-export const ImageUpload = ({ onImageSelect, selectedImage }: ImageUploadProps) => {
+export const ImageUpload = ({ onImageSelect, selectedImage, currentFile, onReset }: ImageUploadProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const openingRef = useRef(false);
   const [openLock, setOpenLock] = useState(false);
@@ -43,34 +45,36 @@ export const ImageUpload = ({ onImageSelect, selectedImage }: ImageUploadProps) 
   };
 
   const validateAndAccept = useCallback(
-    (file: File | undefined | null) => {
-      if (!file) return;
+    (file: File | undefined | null): boolean => {
+      if (!file) return false;
       if (!isSupportedFile(file)) {
-        toast({ title: "Format invalide", description: "Veuillez sélectionner une image PNG, JPG, JPEG ou SVG.", variant: "destructive" });
-        return;
+        toast({ title: "Format invalide", description: "Veuillez sélectionner une image PNG, JPG, JPEG, WebP ou SVG.", variant: "destructive" });
+        return false;
       }
       if (file.size > IMAGE_PROCESSING.MAX_FILE_SIZE_BYTES) {
         toast({ title: "Image trop volumineuse", description: `La taille maximale est de ${IMAGE_PROCESSING.MAX_FILE_SIZE_MB} MB.`, variant: "destructive" });
-        return;
+        return false;
       }
       setActualFile(file);
       onImageSelect(file);
+      return true;
     },
     [onImageSelect, toast]
   );
 
   useEffect(() => {
-    if (selectedImage && actualFile) {
+    const file = currentFile ?? actualFile;
+    if (selectedImage && file) {
       const img = new Image();
       img.onload = () => {
-        setImageInfo({ width: img.width, height: img.height, size: formatSize(actualFile.size), name: actualFile.name });
+        setImageInfo({ width: img.width, height: img.height, size: formatSize(file.size), name: file.name });
       };
       img.src = selectedImage;
       return () => { img.onload = null; };
     } else {
       setImageInfo(null);
     }
-  }, [selectedImage, actualFile]);
+  }, [selectedImage, actualFile, currentFile]);
 
   const openFileDialog = useCallback(() => {
     if (openingRef.current || openLock) return;
@@ -120,9 +124,10 @@ export const ImageUpload = ({ onImageSelect, selectedImage }: ImageUploadProps) 
     if (!url) return;
 
     try {
-      new URL(url);
+      const parsed = new URL(url);
+      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Protocole interdit');
     } catch {
-      toast({ title: "URL invalide", description: "Veuillez entrer une URL valide.", variant: "destructive" });
+      toast({ title: "URL invalide", description: "Veuillez entrer une adresse HTTP ou HTTPS valide.", variant: "destructive" });
       return;
     }
 
@@ -133,6 +138,8 @@ export const ImageUpload = ({ onImageSelect, selectedImage }: ImageUploadProps) 
       try {
         const resp = await fetch(url);
         if (!resp.ok) throw new Error("CORS or HTTP error");
+        const declaredSize = Number(resp.headers.get('content-length'));
+        if (declaredSize > IMAGE_PROCESSING.MAX_FILE_SIZE_BYTES) throw new Error('Image trop volumineuse (20 Mo maximum)');
         blob = await resp.blob();
       } catch {
         // Fallback to edge function proxy
@@ -143,10 +150,15 @@ export const ImageUpload = ({ onImageSelect, selectedImage }: ImageUploadProps) 
         blob = data as Blob;
       }
 
-      const ext = url.split(".").pop()?.split("?")[0]?.toLowerCase() || "png";
+      if (!(blob instanceof Blob) || !blob.type.startsWith("image/")) throw new Error("La réponse n’est pas une image valide.");
+      const extByMime: Record<string, string> = {
+        'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg',
+        'image/webp': 'webp', 'image/svg+xml': 'svg',
+      };
+      const ext = extByMime[blob.type.toLowerCase()] ?? 'png';
       const name = `url-import-${Date.now()}.${ext}`;
       const file = new File([blob], name, { type: blob.type || "image/png" });
-      validateAndAccept(file);
+      if (!validateAndAccept(file)) return;
       setUrlInput("");
       toast({ title: "Image importée depuis l'URL" });
     } catch (err: unknown) {
@@ -202,7 +214,7 @@ export const ImageUpload = ({ onImageSelect, selectedImage }: ImageUploadProps) 
                 Glissez-déposez, collez une URL, ou utilisez la webcam
               </p>
               <Badge variant="secondary" className="mt-0.5 text-[9px] px-1.5 py-0">
-                PNG, JPG, JPEG ou SVG • Max {IMAGE_PROCESSING.MAX_FILE_SIZE_MB} MB
+                PNG, JPG, JPEG, WebP ou SVG • Max {IMAGE_PROCESSING.MAX_FILE_SIZE_MB} MB
               </Badge>
             </div>
 
@@ -290,7 +302,7 @@ export const ImageUpload = ({ onImageSelect, selectedImage }: ImageUploadProps) 
               <Button type="button" onClick={(e) => { e.stopPropagation(); openFileDialog(); }} variant="outline" disabled={openLock} className="flex-1 hover:border-primary text-xs h-7">
                 <ImageIcon className="mr-1.5 h-3 w-3" /> Changer d'image
               </Button>
-              <Button type="button" onClick={() => setActualFile(null)} variant="ghost" className="text-[10px] text-muted-foreground h-7 px-2" title="Réinitialiser l'info locale (nom/taille)">
+              <Button type="button" onClick={() => { setActualFile(null); setImageInfo(null); onReset?.(); }} variant="ghost" className="text-[10px] text-muted-foreground h-7 px-2" title="Retirer l’image et les résultats de ce document">
                 Réinitialiser
               </Button>
             </div>

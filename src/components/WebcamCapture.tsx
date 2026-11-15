@@ -65,7 +65,10 @@ export function WebcamCapture({ open, onOpenChange, onCapture }: WebcamCapturePr
 
   const handleCapture = () => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !video.videoWidth || !video.videoHeight) {
+      setError("La caméra n’a pas encore fourni d’image. Réessayez.");
+      return;
+    }
     const canvas = document.createElement("canvas");
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
@@ -143,7 +146,7 @@ export function WebcamCapture({ open, onOpenChange, onCapture }: WebcamCapturePr
               <Button variant="outline" onClick={() => onOpenChange(false)}>
                 <X className="h-4 w-4 mr-1" /> Annuler
               </Button>
-              <Button onClick={handleCapture} disabled={isStarting}>
+              <Button onClick={handleCapture} disabled={isStarting || !streamRef.current}>
                 <Camera className="h-4 w-4 mr-1" /> Capturer
               </Button>
             </>

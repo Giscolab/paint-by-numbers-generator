@@ -122,7 +122,7 @@ export function CompareSlider({
 
         {/* BEFORE (overlay clip) */}
         <div
-          className="absolute inset-0 overflow-hidden transition-[clip-path] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]"
+          className="absolute inset-0 overflow-hidden transition-[clip-path] duration-200 ease-in-out"
           style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }}
           aria-hidden="true"
         >

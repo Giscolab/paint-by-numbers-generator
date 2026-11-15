@@ -6,6 +6,7 @@ export interface PdfExportOptions {
   orientation: "portrait" | "landscape";
   includeColorized: boolean;
   includeNumbered: boolean;
+  includeContours: boolean;
   includeLegend: boolean;
   includeInstructions: boolean;
 }
@@ -23,6 +24,7 @@ export const DEFAULT_PDF_OPTIONS: PdfExportOptions = {
   orientation: "portrait",
   includeColorized: true,
   includeNumbered: true,
+  includeContours: false,
   includeLegend: true,
   includeInstructions: false,
 };
@@ -61,7 +63,7 @@ function addImagePage(
   // jsPDF reads the PNG header synchronously; a newly-created HTMLImageElement has
   // naturalWidth=0 until load and used to distort every exported aspect ratio.
   const { width: imgW, height: imgH } = doc.getImageProperties(dataUrl);
-  const ratio = Math.min(usableW / imgW, usableH / imgH, 1);
+  const ratio = Math.min(usableW / imgW, usableH / imgH);
   const drawW = imgW * ratio;
   const drawH = imgH * ratio;
   const x = MARGIN + (usableW - drawW) / 2;
@@ -108,6 +110,15 @@ export function exportToPdf(
     }
   }
 
+  if (options.includeContours) {
+    const dataUrl = canvasToDataUrl(renderToCanvas, "contours", 2);
+    if (dataUrl) {
+      if (pageAdded) doc.addPage();
+      addImagePage(doc, dataUrl, "Contours sans numéros", pageW, pageH);
+      pageAdded = true;
+    }
+  }
+
   // Page 3: Legend
   if (options.includeLegend && result.legend && result.legend.length > 0) {
     if (pageAdded) doc.addPage();
@@ -121,9 +132,17 @@ export function exportToPdf(
     const rowH = 8;
     const swatchSize = 5;
 
+    const rowsPerPage = Math.max(1, Math.floor((pageH - MARGIN - startY - rowH) / rowH));
+    const itemsPerPage = rowsPerPage * 3;
     result.legend.forEach((entry, i) => {
-      const col = i % 3;
-      const row = Math.floor(i / 3);
+      const indexOnPage = i % itemsPerPage;
+      if (i > 0 && indexOnPage === 0) {
+        doc.addPage();
+        doc.setFontSize(14);
+        doc.text("Légende des couleurs (suite)", MARGIN, MARGIN + 8);
+      }
+      const col = indexOnPage % 3;
+      const row = Math.floor(indexOnPage / 3);
       const x = MARGIN + col * colW;
       const y = startY + row * rowH;
 

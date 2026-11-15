@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 interface ColorPaletteProps {
   colors: string[];
+  onColorSelect?: (colorIdx: number) => void;
 }
 
 /** Choisit un texte lisible (blanc/noir) sur la couleur de fond */
@@ -22,22 +23,21 @@ function readableTextOn(bgHex: string): "white" | "black" {
   return L > 0.5 ? "black" : "white";
 }
 
-export const ColorPalette = ({ colors }: ColorPaletteProps) => {
+export const ColorPalette = ({ colors, onColorSelect }: ColorPaletteProps) => {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   const handleCopyColor = useCallback(async (color: string, index: number) => {
+    onColorSelect?.(index);
     try {
+      if (!navigator.clipboard?.writeText) throw new Error("Presse-papiers indisponible");
       await navigator.clipboard.writeText(color);
       setCopiedIndex(index);
       toast.success(`Couleur ${index + 1} copiée !`, { description: color, duration: 1600 });
       setTimeout(() => setCopiedIndex(null), 1600);
     } catch {
-      // Fallback très basique
-      setCopiedIndex(index);
-      toast.success(`Couleur ${index + 1} copiée (fallback)`, { description: color, duration: 1600 });
-      setTimeout(() => setCopiedIndex(null), 1600);
+      toast.error("Copie impossible : vérifiez les permissions du presse-papiers.");
     }
-  }, []);
+  }, [onColorSelect]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLButtonElement>, color: string, index: number) => {

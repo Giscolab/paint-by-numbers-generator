@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { useStudio } from "@/contexts/StudioContext";
 import { exportToPdf, PdfExportOptions, DEFAULT_PDF_OPTIONS } from "@/lib/exportPdf";
+import { withPngDpi } from "@/lib/pngDpi";
 
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
@@ -53,7 +54,7 @@ export function ExportBar() {
   const [showPdfDialog, setShowPdfDialog] = useState(false);
   const [pdfOptions, setPdfOptions] = useState<PdfExportOptions>(DEFAULT_PDF_OPTIONS);
 
-  const disabled = !processedData;
+  const disabled = !processedData || studio.isProcessing;
 
   // Dimensions info
   const imgW = processedData?.numbered?.width || 0;
@@ -65,7 +66,8 @@ export function ExportBar() {
     (scaleValue = 1) => {
       if (!processedData) return;
       try {
-        const mode: ViewMode = (studio.viewMode as ViewMode) || "colorized";
+        const mode: ViewMode = ["original", "colorized", "contours", "numbered"].includes(studio.viewMode)
+          ? studio.viewMode : "colorized";
         studio.exportCanvasAsPNG(
           mode,
           `pbn-${mode}-${new Date().toISOString().slice(0, 10)}.png`,
@@ -81,7 +83,7 @@ export function ExportBar() {
     [processedData, studio, backgroundColor]
   );
 
-  const handleExportZIP = useCallback(async () => {
+  const handleExportZIP = useCallback(async (advanced = false) => {
     if (!processedData) return;
     setIsExporting(true);
     const zip = new JSZip();
@@ -89,36 +91,39 @@ export function ExportBar() {
 
     try {
       const modes: Array<{ key: ViewMode; enabled: boolean }> = [
-        { key: "colorized", enabled: layerColorized },
-        { key: "contours", enabled: layerContours },
-        { key: "numbered", enabled: layerNumbers },
+        { key: "colorized", enabled: !advanced || layerColorized },
+        { key: "contours", enabled: !advanced || layerContours },
+        { key: "numbered", enabled: !advanced || layerNumbers },
       ];
 
+      if (modes.every(mode => !mode.enabled)) throw new Error("Sélectionnez au moins un calque à exporter.");
       for (const { key, enabled } of modes) {
         if (!enabled) continue;
-        const canvas = studio.renderToCanvas(key, scale, backgroundColor);
+        const canvas = studio.renderToCanvas(key, advanced ? scale : 1, advanced ? backgroundColor : "#ffffff");
         if (!canvas) continue;
         const blob = await new Promise<Blob | null>((resolve) =>
           canvas.toBlob((b) => resolve(b), "image/png")
         );
-        if (blob) zip.file(`pbn-${key}-${date}.png`, blob);
+        if (!blob) throw new Error("Impossible de créer le PNG du calque « " + key + " ».");
+        zip.file(`pbn-${key}-${date}.png`, advanced ? await withPngDpi(blob, dpi) : blob);
       }
 
+      if (Object.keys(zip.files).length === 0) throw new Error("Le ZIP ne contient aucun rendu.");
       const zipBlob = await zip.generateAsync({ type: "blob" });
       saveAs(zipBlob, `pbn-export-${date}.zip`);
       toast.success("ZIP exporté avec succès 🗜️");
     } catch (e) {
       console.error(e);
-      toast.error("Erreur lors de l'export ZIP");
+      toast.error(e instanceof Error ? e.message : "Erreur lors de l'export ZIP");
     } finally {
       setIsExporting(false);
     }
-  }, [studio, processedData, scale, backgroundColor, layerColorized, layerContours, layerNumbers]);
+  }, [studio, processedData, scale, backgroundColor, dpi, layerColorized, layerContours, layerNumbers]);
 
-  const handleExportPDF = useCallback(() => {
+  const handleExportPDF = useCallback((options: PdfExportOptions = pdfOptions) => {
     if (!processedData) return;
     try {
-      const blob = exportToPdf(processedData, studio.renderToCanvas, pdfOptions);
+      const blob = exportToPdf(processedData, studio.renderToCanvas, options);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -133,17 +138,28 @@ export function ExportBar() {
     }
   }, [processedData, studio, pdfOptions]);
 
-  const handleCopy = useCallback(() => {
+  const handleCopy = useCallback(async () => {
     if (!processedData) return;
-    navigator.clipboard
-      .writeText(`Image2Canvas export du ${new Date().toLocaleDateString()}`)
-      .then(() => {
-        setCopied(true);
-        toast.success("Copié !");
-        setTimeout(() => setCopied(false), 2000);
-      })
-      .catch(() => toast.error("Échec de la copie"));
-  }, [processedData]);
+    const width = processedData.metadata?.width ?? processedData.colorized?.width ?? 0;
+    const height = processedData.metadata?.height ?? processedData.colorized?.height ?? 0;
+    const summary = [
+      "PaintByNumbers Studio",
+      "Projet : " + (studio.currentProject?.name ?? "Sans titre"),
+      "Dimensions : " + width + " × " + height + " px",
+      "Couleurs : " + processedData.palette.length,
+      "Zones : " + processedData.zones.length,
+      "Palette : " + processedData.palette.map((hex, i) => (i + 1) + ". " + hex).join(", "),
+    ].join("\n");
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Presse-papiers indisponible");
+      await navigator.clipboard.writeText(summary);
+      setCopied(true);
+      toast.success("Résumé du projet copié.");
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("Échec de la copie : accès au presse-papiers refusé.");
+    }
+  }, [processedData, studio.currentProject?.name]);
 
   return (
     <TooltipProvider>
@@ -161,7 +177,7 @@ export function ExportBar() {
         {/* ZIP */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button size="sm" variant="outline" onClick={handleExportZIP} disabled={disabled || isExporting}>
+            <Button size="sm" variant="outline" onClick={() => { void handleExportZIP(); }} disabled={disabled || isExporting}>
               <FileArchive className="w-4 h-4 mr-1" /> ZIP
             </Button>
           </TooltipTrigger>
@@ -181,7 +197,7 @@ export function ExportBar() {
         {/* Advanced */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button size="sm" variant="ghost" onClick={() => setShowDialog(true)} disabled={disabled}>
+            <Button size="sm" variant="ghost" aria-label="Options d'export avancées" onClick={() => setShowDialog(true)} disabled={disabled}>
               <Settings className="w-4 h-4" />
             </Button>
           </TooltipTrigger>
@@ -191,7 +207,7 @@ export function ExportBar() {
         {/* Copy */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button size="sm" variant="ghost" onClick={handleCopy} disabled={disabled}>
+            <Button size="sm" variant="ghost" aria-label="Copier le résumé du projet" onClick={handleCopy} disabled={disabled}>
               {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
             </Button>
           </TooltipTrigger>
@@ -209,6 +225,7 @@ export function ExportBar() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
+            {outputFormat === "png" && <>
             {/* Scale */}
             <div>
               <Label>Échelle : {scale}x</Label>
@@ -217,7 +234,7 @@ export function ExportBar() {
 
             {/* DPI */}
             <div>
-              <Label>DPI</Label>
+              <Label>DPI du PNG (métadonnées d’impression)</Label>
               <div className="flex gap-1 mt-1">
                 {DPI_PRESETS.map((p) => (
                   <Button
@@ -240,6 +257,7 @@ export function ExportBar() {
               </div>
             )}
 
+            </>}
             {/* Layers */}
             <div>
               <Label className="mb-2 block">Calques à inclure</Label>
@@ -259,12 +277,18 @@ export function ExportBar() {
               </div>
             </div>
 
+            {outputFormat === "png" && <>
             {/* Background */}
             <div>
               <Label htmlFor="export-background-color">Couleur de fond</Label>
               <Input id="export-background-color" type="color" value={backgroundColor} aria-label="Couleur de fond" onChange={(e) => setBackgroundColor(e.target.value)} />
             </div>
 
+            </>}
+            {outputFormat === "pdf" && <div className="grid grid-cols-2 gap-2">
+              <div><Label>Format papier</Label><Select value={pdfOptions.paperSize} onValueChange={value => setPdfOptions(prev => ({ ...prev, paperSize: value as PdfExportOptions["paperSize"] }))}><SelectTrigger className="h-8"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="a4">A4</SelectItem><SelectItem value="a3">A3</SelectItem><SelectItem value="letter">Letter</SelectItem></SelectContent></Select></div>
+              <div><Label>Orientation</Label><Select value={pdfOptions.orientation} onValueChange={value => setPdfOptions(prev => ({ ...prev, orientation: value as PdfExportOptions["orientation"] }))}><SelectTrigger className="h-8"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="portrait">Portrait</SelectItem><SelectItem value="landscape">Paysage</SelectItem></SelectContent></Select></div>
+            </div>}
             {/* Format */}
             <div>
               <Label>Format de sortie</Label>
@@ -286,19 +310,20 @@ export function ExportBar() {
                 if (outputFormat === "pdf") {
                   // Use PDF export with selected layers
                   const opts: PdfExportOptions = {
-                    ...DEFAULT_PDF_OPTIONS,
+                    ...pdfOptions,
                     includeColorized: layerColorized,
                     includeNumbered: layerNumbers,
+                    includeContours: layerContours,
                     includeLegend: true,
                   };
                   setPdfOptions(opts);
-                  handleExportPDF();
+                  handleExportPDF(opts);
                 } else {
-                  handleExportZIP();
+                  void handleExportZIP(true);
                 }
                 setShowDialog(false);
               }}
-              disabled={isExporting}
+              disabled={isExporting || (!layerColorized && !layerContours && !layerNumbers)}
             >
               {outputFormat === "pdf" ? (
                 <><FileText className="w-4 h-4 mr-2" /> Export PDF</>
@@ -353,6 +378,10 @@ export function ExportBar() {
                   Contours numérotés
                 </label>
                 <label className="flex items-center gap-2 text-sm">
+                  <Checkbox checked={pdfOptions.includeContours} onCheckedChange={(v) => setPdfOptions((o) => ({ ...o, includeContours: !!v }))} />
+                  Contours sans numéros
+                </label>
+                <label className="flex items-center gap-2 text-sm">
                   <Checkbox checked={pdfOptions.includeLegend} onCheckedChange={(v) => setPdfOptions((o) => ({ ...o, includeLegend: !!v }))} />
                   Légende des couleurs
                 </label>
@@ -365,7 +394,7 @@ export function ExportBar() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowPdfDialog(false)}>Annuler</Button>
-            <Button onClick={handleExportPDF}>
+            <Button onClick={() => handleExportPDF()}>
               <FileText className="w-4 h-4 mr-2" /> Générer le PDF
             </Button>
           </DialogFooter>

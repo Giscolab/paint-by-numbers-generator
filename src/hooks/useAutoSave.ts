@@ -1,48 +1,49 @@
-import { useEffect, useRef } from 'react';
-import { useStudio } from '@/contexts/StudioContext';
+import { useEffect, useRef } from "react";
+import { useStudio } from "@/contexts/StudioContext";
 
 const AUTO_SAVE_INTERVAL = 2 * 60 * 1000; // 2 minutes
 
+/** Persist changed projects using a stable callback, not a stale context snapshot. */
 export function useAutoSave() {
-  const studio = useStudio();
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const lastSaveRef = useRef<string>('');
+  const { currentProject, result, settings, preferences, saveProject } = useStudio();
+  const pendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSaveRef = useRef("");
+
+  const projectId = currentProject?.id;
+  const projectName = currentProject?.name;
+  const autoSave = preferences.autoSave;
 
   useEffect(() => {
-    if (!studio.preferences.autoSave) return;
-    if (!studio.currentProject?.name || !studio.result) return;
+    if (!autoSave || !projectId || !projectName || !result) return;
 
-    // Create a unique key for current state
     const stateKey = JSON.stringify({
-      projectId: studio.currentProject.id,
-      settings: studio.settings,
-      hasResult: !!studio.result,
+      projectId,
+      projectName,
+      settings,
+      cacheKey: result.metadata?.cacheKey,
+      generationTime: result.metadata?.totalProcessingTimeMs,
+      zones: result.zones.length,
+      colors: result.palette.length,
     });
 
-    // Only save if state has changed
     if (stateKey === lastSaveRef.current) return;
 
-    // Clear existing timeout
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
-
-    // Schedule auto-save
-    saveTimeoutRef.current = setTimeout(() => {
-      try {
-        const autoSaveName = `${studio.currentProject.name} (auto)`;
-        studio.saveProject(autoSaveName);
-        lastSaveRef.current = stateKey;
-        console.log('✅ Auto-save completed');
-      } catch (error) {
-        console.error('Auto-save failed:', error);
-      }
+    pendingRef.current = setTimeout(() => {
+      void saveProject(projectName)
+        .then(() => {
+          lastSaveRef.current = stateKey;
+          console.info("[Studio] Sauvegarde automatique terminée.");
+        })
+        .catch(error => {
+          console.error("[Studio] Échec de la sauvegarde automatique.", error);
+        });
     }, AUTO_SAVE_INTERVAL);
 
     return () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
+      if (pendingRef.current !== null) {
+        clearTimeout(pendingRef.current);
+        pendingRef.current = null;
       }
     };
-  }, [studio.currentProject, studio.result, studio.settings, studio.preferences.autoSave]);
+  }, [autoSave, projectId, projectName, result, settings, saveProject]);
 }

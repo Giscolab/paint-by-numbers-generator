@@ -78,7 +78,7 @@ export const AiSuggestionsCard = ({
         </h3>
         {suggestion && (
           <Badge variant="secondary" className="text-[10px] px-1.5 py-0.5">
-            {DIFFICULTY_LABELS[suggestion.difficulty]}
+            {DIFFICULTY_LABELS[suggestion.difficulty]} · {suggestion.source === "local" ? "local" : "IA"}
           </Badge>
         )}
       </div>
