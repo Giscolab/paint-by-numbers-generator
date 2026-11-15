@@ -25,6 +25,7 @@ export class ImageProcessingWorker {
   private isActive: boolean = false;
   private idleTimeoutId: number | null = null;
   private lastResult: ProcessedResult | null = null;
+  private cancelActive: (() => void) | null = null;
 
   /**
    * Process image using Web Worker with progress updates
@@ -79,7 +80,7 @@ export class ImageProcessingWorker {
         }
 
         timeoutId = setTimeout(() => {
-          if (!resultReceived && this.isActive) {
+          if (this.isActive) {
             cleanup();
             reject(
               new Error(`Timeout: Le traitement a dépassé ${timeoutDescription}`)
@@ -91,12 +92,18 @@ export class ImageProcessingWorker {
 
       const cleanup = () => {
         this.isActive = false;
+        this.cancelActive = null;
         if (timeoutId !== null) {
           clearTimeout(timeoutId);
           timeoutId = null;
         }
         // Start idle timeout after processing completes
         this.startIdleTimeout();
+      };
+
+      this.cancelActive = () => {
+        cleanup();
+        reject(new DOMException('Traitement annulé.', 'AbortError'));
       };
 
       try {
@@ -269,6 +276,7 @@ export class ImageProcessingWorker {
    * Terminate worker and cleanup resources
    */
   terminate(): void {
+    this.cancelActive?.();
     this.isActive = false;
     
     if (this.idleTimeoutId !== null) {

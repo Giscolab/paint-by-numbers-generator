@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { writePngDpi } from "../pngDpi";
+import { writePngDpi } from "@/lib/pngDpi";
 
 const TINY_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/tOUAAAAASUVORK5CYII=";
 const sample = () => new Uint8Array(Buffer.from(TINY_PNG, "base64"));

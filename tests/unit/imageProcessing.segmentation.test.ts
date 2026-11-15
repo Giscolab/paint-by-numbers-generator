@@ -44,7 +44,7 @@ describe('labelConnectedComponents - large uniform color segmentation', () => {
   ];
 
   it.each(testCases)('returns one contiguous zone covering all pixels for $width×$height', async ({ width, height }) => {
-    const { labelConnectedComponents } = await import('../imageProcessing');
+    const { labelConnectedComponents } = await import('@/lib/imageProcessing');
 
     const totalPixels = width * height;
     const colorMap = new Array<number>(totalPixels).fill(3);

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { boundedImageSize, decodeImageFile, validateImageInput } from '../imageDecode';
-import { reduceSignalChannels } from '../signalSampling';
+import { boundedImageSize, decodeImageFile, validateImageInput } from '@/lib/imageDecode';
+import { reduceSignalChannels } from '@/lib/signalSampling';
 
 afterEach(()=>vi.unstubAllGlobals());
 describe('décodage borné des images',()=>{

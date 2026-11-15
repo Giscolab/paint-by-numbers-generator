@@ -1,8 +1,8 @@
 import { vi, describe, expect, it } from 'vitest';
-import { flattenOnWhite, imageFingerprint, processingCacheKey, quantizePerceptually, placeRegionLabels, validateModelParameters, type ModelParameters } from '../pbnModel';
-import { labelConnectedComponents, mergeSmallZones, smoothZones, detectEdges, traceContours, generateSVG, processImage } from '../imageProcessing';
-import { renderPipeline } from '../renderPipeline';
-import { exportToSvg } from '../exportSvg';
+import { flattenOnWhite, imageFingerprint, processingCacheKey, quantizePerceptually, placeRegionLabels, validateModelParameters, type ModelParameters } from '@/lib/pbnModel';
+import { labelConnectedComponents, mergeSmallZones, smoothZones, detectEdges, traceContours, generateSVG, processImage } from '@/lib/imageProcessing';
+import { renderPipeline } from '@/lib/renderPipeline';
+import { exportToSvg } from '@/lib/exportSvg';
 
 vi.hoisted(() => {
 class TestImageData {

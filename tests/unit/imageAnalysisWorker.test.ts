@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-vi.mock('../imageProcessing',()=>({analyzeImageColors:vi.fn()}));
-import { analyzeImageWithWorker } from '../imageAnalysisWorker';
+vi.mock('@/lib/imageProcessing',()=>({analyzeImageColors:vi.fn()}));
+import { analyzeImageWithWorker } from '@/lib/imageAnalysisWorker';
 class MockWorker {
   static current:MockWorker;
   onmessage:((event:MessageEvent)=>void)|null=null;

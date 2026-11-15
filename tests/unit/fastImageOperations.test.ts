@@ -8,9 +8,9 @@ vi.hoisted(() => {
   Object.assign(globalThis, { OffscreenCanvas: TestCanvas });
 });
 
-import { consolidateColorMap, labelConnectedComponents, smoothZones } from '../imageProcessing';
-import { rgbToLab } from '../colorUtils';
-import { consolidateColorMapTyped, labelConnectedComponentsFast, smoothZonesFast } from '../fastImageOperations';
+import { consolidateColorMap, labelConnectedComponents, smoothZones } from '@/lib/imageProcessing';
+import { rgbToLab } from '@/lib/colorUtils';
+import { consolidateColorMapTyped, labelConnectedComponentsFast, smoothZonesFast } from '@/lib/fastImageOperations';
 
 describe('algorithmes haute performance : équivalence des résultats', () => {
   it('reproduit les identités, les couleurs et les barycentres des zones', () => {
@@ -96,6 +96,22 @@ describe('algorithmes haute performance : équivalence des résultats', () => {
       expect(fast.consolidatedPalette).toEqual(old.consolidatedPalette);
       expect([...fast.consolidatedColorMap]).toEqual(old.consolidatedColorMap);
     }
+  });
+
+  it('valide le lissage à fenêtre 9×9 sur une grande image et mesure son coût', () => {
+    const width = 900, height = 600;
+    const input = Int32Array.from({ length: width * height }, (_, i) => {
+      const x = i % width, y = Math.floor(i / width);
+      return (i % 167 === 0) ? 4000 + (i % 6) : Math.floor(x / 32) + Math.floor(y / 24) * 30;
+    });
+    const oldStart = performance.now();
+    const oldOutput = smoothZones(input, width, height, 1);
+    const oldMs = performance.now() - oldStart;
+    const newStart = performance.now();
+    const fastOutput = smoothZonesFast(input, width, height, 1);
+    const fastMs = performance.now() - newStart;
+    expect(fastOutput).toEqual(oldOutput);
+    console.info(`Lissage 900x600 fenêtre 9x9 : ancien ${oldMs.toFixed(1)} ms, rapide ${fastMs.toFixed(1)} ms`);
   });
 
   it('mesure le temps sur une image fragmentée sans seuil matériel fixe', () => {

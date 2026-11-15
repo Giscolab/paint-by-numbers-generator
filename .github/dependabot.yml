@@ -1,0 +1,41 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '07:00'
+      timezone: Europe/Paris
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: 'chore(deps)'
+    groups:
+      vitest-suite:
+        applies-to: version-updates
+        patterns: [vitest, '@vitest/*']
+        # Coverage providers must track the test runner, including major bumps.
+      npm-minor-and-patch:
+        applies-to: version-updates
+        patterns: ['*']
+        exclude-patterns: [vitest, '@vitest/*']
+        update-types: [minor, patch]
+      npm-security:
+        applies-to: security-updates
+        patterns: ['*']
+    # Other major updates remain individual PRs for deliberate review.
+    # No automatic merge is configured.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '07:30'
+      timezone: Europe/Paris
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: 'chore(actions)'
+    groups:
+      actions-minor-and-patch:
+        patterns: ['*']
+        update-types: [minor, patch]

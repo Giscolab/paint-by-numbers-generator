@@ -1,344 +1,125 @@
-# 🎨 Canvas to Colors
+# Canvas to Colors
 
-![Canvas to Colors](https://img.shields.io/badge/Canvas_to_Colors-Professional_Web_Studio-blue?style=for-the-badge)
-![Version](https://img.shields.io/badge/version-0.0.0-blue?style=flat-square)
-![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
-![React](https://img.shields.io/badge/react-18.3.1-61DAFB?style=flat-square&logo=react&logoColor=black)
-![TypeScript](https://img.shields.io/badge/typescript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)
+### De la photo au modèle de peinture par numéros.
 
-> **Transform any image into professional paint-by-numbers outputs**  
-> Studio-grade web application with advanced color analysis, parametric controls, and multi-format export.
+**Canvas to Colors — PaintByNumbers Studio** transforme vos images en une palette de peinture, des contours et un dessin numéroté. Importez une photo, analysez ses couleurs, ajustez le niveau de détail et préparez vos rendus à télécharger ou à imprimer, dans un même atelier visuel.
 
----
+![Le studio Canvas to Colors avec un paysage de montagne et le thème Padawan](docs/studio-preview.jpg)
 
-## 🚀 Quick Overview
+*Capture de l’application locale. [Photo source sur Unsplash](https://images.unsplash.com/photo-1464822759023-fed622ff2c3b).*
 
-**Canvas to Colors** is a client-side image processing studio built with React, TypeScript, and Vite. It enables users to upload images, analyze colors, apply intelligent recommendations, generate paint-by-numbers renders, and export results in multiple formats.
+[Présentation](#présentation) · [Installation](#installation) · [Utilisation](#utilisation) · [Développement](#développement)
 
-Designed for **creative studios**, **print shops**, and **artists**, it combines scientific rigor with a fluid visual experience.
+## Présentation
 
-### ✨ Key Features
+Le studio associe un plan de travail central, un panneau de configuration et un inspecteur. Parcourez l’original, le rendu colorisé, les contours, les zones numérotées et une comparaison avant/après.
 
-- 🎨 **Intelligent Color Analysis** – ΔE2000 color distance, K-means++ clustering, interactive histograms
-- ⚙️ **Parametric Pipeline** – Adjustable colors, region merging, smoothing, artistic effects
-- 🖼️ **Figma-like Canvas** – Zoom (10%-800%), smooth panning, overlays, region selection
-- 💾 **Project Management** – Favorites, search, import/export workflows
-- 📤 **Professional Exports** – PNG, JSON, SVG vector, ZIP bundles
-- 📊 **Built-in Profiling** – Performance timeline, LRU cache monitoring
-- 🌓 **Theme Support** – Dark/Light/System modes with unified HSL design tokens
-- 👷 **Web Worker Processing** – Non-blocking pipeline with progress tracking
+- **Importer** une image PNG, JPEG, WebP ou SVG, par fichier ou glisser-déposer. L’import par URL et la capture webcam sont également disponibles.
+- **Analyser** les couleurs, les contours et la complexité pour obtenir des recommandations de départ.
+- **Ajuster** le nombre de couleurs, la fusion des petites zones, la douceur des bords, la palette et les effets artistiques.
+- **Inspecter** le modèle avec le zoom, le déplacement, la palette extraite et les différents rendus.
+- **Exporter** un PNG, un ZIP réunissant les rendus ou un PDF avec modèle et légende. L’inspecteur propose aussi des options de calques, de résolution et de mise en page.
+- **Enregistrer** un projet dans le navigateur et le rouvrir depuis le menu Fichier.
+- **Personnaliser** l’atelier avec les quinze palettes issues de CryptoKeep, dont Padawan, Sith et Millennium, ainsi que les modes clair, sombre et système.
 
----
+L’analyse et la génération s’exécutent dans le navigateur, avec des Web Workers pour les calculs. Les grandes images sont adaptées à une résolution de travail maximale de **1 200 pixels sur le plus grand côté** ; les fichiers sont limités à **20 Mo**. Augmenter la résolution d’export ne recrée pas les détails supprimés lors de cette adaptation.
 
-## 📸 Studio Preview
+Le projet est en cours d’affinage. Un dessin très détaillé peut encore produire des zones trop fines pour recevoir un numéro lisible : le studio signale ces cas pour permettre une vérification avant impression.
 
-![Demo Screenshot](https://raw.githubusercontent.com/Giscolab/paint-by-numbers-generator/main/docs/demo.png)
+## Installation
 
----
+### Prérequis
 
-## 📋 Table of Contents
+- **Node.js 22.12 ou plus récent dans la branche 22**, ou **Node.js 24 et plus**.
+- **npm**, utilisé avec le fichier `package-lock.json` du dépôt.
+- Un navigateur récent prenant en charge Canvas et les Web Workers.
 
-- [Technologies Used](#-technologies-used)
-- [Prerequisites](#-prerequisites)
-- [Installation](#-installation)
-- [Configuration](#-configuration)
-- [Usage](#-usage)
-- [Project Structure](#-project-structure)
-- [Processing Pipeline](#-processing-pipeline)
-- [Export Formats](#-export-formats)
-- [Contributing](#-contributing)
-- [License](#-license)
-
----
-
-## 🧩 Technologies Used
-
-### Frontend Core
-- **React 18** – UI framework
-- **TypeScript 5** – Type safety
-- **Vite** – Build tool and dev server
-- **React Router** – Client-side routing
-- **Tailwind CSS** – Utility-first styling
-- **shadcn/ui + Radix UI** – Component library
-
-### Image Processing & Geometry
-- **Canvas API** – Image manipulation
-- **marchingsquares** – Contour extraction
-- **martinez-polygon-clipping** – Polygon operations
-- **polylabel** – Label placement
-- **simplify-js** – Path simplification
-- **jszip + file-saver** – Export generation
-
-### Backend Integration
-- **Supabase** – Optional image URL proxy and AI parameter suggestions
-- **SQL Migrations** – Database schema management (`supabase/migrations/`)
-
-### Performance
-- **Web Workers** – Background processing
-- **LRU Cache** – Optimized data caching
-- **Custom Profiler** – Performance monitoring
-
----
-
-## ✅ Prerequisites
-
-- **Node.js 22.12+** (ou 24+ ; voir `engines` dans `package.json`)
-- **npm** (the project uses `package-lock.json`)
-- **Modern browser** (Chrome, Edge, Firefox, Safari)
-- **(Optional)** Supabase project for the image URL proxy and remote AI suggestions
-
----
-
-## ⚡ Installation
+### Installer et démarrer
 
 ```bash
-# Clone the repository
-git clone <your-repository-url>
+git clone https://github.com/Giscolab/paint-by-numbers-generator.git
 cd paint-by-numbers-generator
+npm ci
+```
 
-# Install dependencies
-npm install
+Le client Supabase attend les deux variables suivantes dans un fichier `.env` à la racine. Si le dépôt local possède déjà ce fichier, conservez sa configuration.
 
-# Start development server
+```dotenv
+VITE_SUPABASE_URL=https://votre-projet.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=votre-cle-publique-supabase
+```
+
+Utilisez l’URL et la clé publique de votre projet Supabase. Les valeurs préfixées par `VITE_` sont exposées au navigateur : n’y placez aucune clé secrète ou `service_role`.
+
+```bash
 npm run dev
 ```
 
-Access the application at **http://localhost:8080**
+Ouvrez **[http://localhost:8080/](http://localhost:8080/)**. Si ce port est déjà occupé, consultez l’adresse indiquée par Vite dans le terminal.
 
-### Build Commands
+### Services optionnels
 
-```bash
-# Development build
-npm run build:dev
+Le calcul des modèles reste local. Deux fonctions Supabase complètent l’expérience : `fetch-image-url` sert de relais lorsque l’image distante ne peut pas être téléchargée directement, et `suggest-parameters` fournit les suggestions d’IA distante. Leur code se trouve dans [`supabase/functions/`](supabase/functions/).
 
-# Production build
-npm run build
+Le bouton **Suggérer des paramètres** transmet un résumé numérique de l’analyse, sans les pixels de l’image. Une suggestion locale est proposée si le service distant échoue. L’import par URL nécessite un accès réseau ; la webcam nécessite votre autorisation dans le navigateur.
 
-# Preview production build
-npm run preview
+## Utilisation
 
-# Lint code
-npm run lint
-```
+### Créer un premier modèle
 
----
+1. **Importez votre image** avec le bouton d’ouverture ou la zone de dépôt du panneau Configuration. Choisissez de préférence un sujet bien détaché de son arrière-plan.
+2. Cliquez sur **Analyser l’image**. Le rapport présente les mesures et des recommandations sur la palette et la taille des zones.
+3. Cliquez sur **Appliquer les recommandations**, puis ajustez les paramètres si nécessaire. Vous pouvez aussi demander des suggestions adaptées au niveau débutant, intermédiaire ou expert.
+4. Cliquez sur **Générer ma création** et suivez la progression du traitement.
+5. Parcourez les vues **Colorisé**, **Contours**, **Numéroté** et **Comparer**. Zoomez pour contrôler les détails et la lisibilité des numéros.
+6. Téléchargez votre résultat avec **PNG**, le menu **Exporter** ou l’onglet **Export** de l’inspecteur.
 
-## 🔧 Configuration
+### Choisir le bon niveau de détail
 
-### 1. Environment Variables
+| Paramètre | Effet recherché |
+| --- | --- |
+| Nombre de couleurs | Une palette réduite simplifie la peinture ; une palette plus large conserve davantage de nuances. |
+| Fusion des petites zones | Une valeur plus élevée regroupe davantage de petites régions et facilite le coloriage. |
+| Douceur des bords | Ajuste le lissage du modèle. Vérifiez le résultat dans les vues Contours et Numéroté. |
+| Palette et effets | Modifient l’apparence du rendu. Contrôlez le modèle après chaque modification. |
 
-Create a `.env` file in the root directory:
+Si un avertissement indique des zones trop fines, augmentez la fusion des petites zones ou réduisez le nombre de couleurs, puis relancez la génération. Les recommandations constituent un point de départ ; la vérification visuelle reste nécessaire avant impression.
 
-```bash
-VITE_SUPABASE_URL=https://<your-project-ref>.supabase.co
-VITE_SUPABASE_PUBLISHABLE_KEY=<your-anon-publishable-key>
-```
+### Se déplacer dans le studio
 
-These variables are consumed by the Supabase client:
+Les commandes **Configuration** et **Inspecteur**, en haut de l’espace de travail, permettent de replier et déplier les panneaux. Utilisez les outils de zoom, de déplacement et d’ajustement à l’écran pour examiner votre création. Sur un écran étroit, repliez un panneau pour dégager le plan de travail.
 
-```typescript
-// src/integrations/supabase/client.ts
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-```
+Le sélecteur de thème se trouve dans l’en-tête. Son choix est conservé dans le navigateur et ne change pas les couleurs de votre image ni de vos exports.
 
-### 2. Application Constants
+### Sauvegarder et exporter
 
-Core settings are centralized in `src/config/constants.ts`:
+Dans **Fichier → Enregistrer le projet localement**, conservez le projet pour le retrouver dans le même navigateur et sur la même adresse du studio. Cette sauvegarde dépend du stockage du navigateur : exportez aussi vos rendus pour garder une copie indépendante.
 
-```typescript
-export const IMAGE_PROCESSING = {
-  MAX_FILE_SIZE_MB: 20,
-  MAX_FILE_SIZE_BYTES: 20 * 1024 * 1024, // 20MB
-  WORKER_TIMEOUT_MS: 5 * 60 * 1000,
-  // ...
-};
-```
+| Format | Utilisation |
+| --- | --- |
+| **PNG** | Télécharger un rendu colorisé, les contours ou le modèle numéroté. |
+| **ZIP** | Réunir les trois rendus, ou sélectionner les calques dans l’export avancé. |
+| **PDF** | Préparer un document avec modèle et légende ; ajuster les pages et le format dans l’inspecteur. |
 
-### 3. Vite Configuration
+## Développement
 
-Build and dev server settings in `vite.config.ts`:
+Le projet utilise **React, TypeScript et Vite**, avec Tailwind CSS et Radix UI pour l’interface, Canvas et les Web Workers pour le traitement, JSZip et jsPDF pour les exports.
 
-- **Host**: `::` (all interfaces)
-- **Port**: `8080`
-- **Source maps**: enabled
-- **Chunking**: manual vendor splitting
+| Commande | Rôle |
+| --- | --- |
+| `npm run dev` | Démarrer le studio en développement. |
+| `npm test` | Exécuter les tests automatisés. |
+| `npm run test:coverage` | Exécuter les tests unitaires et produire le rapport de couverture. |
+| `npm run test:e2e` | Vérifier les parcours Chromium sur la compilation de production. |
+| `npm run test:types` | Vérifier aussi les types des tests et de leur configuration. |
+| `npm run check` | Enchaîner les contrôles locaux de types, lint, couverture et compilation. |
+| `npm run typecheck` | Vérifier les types TypeScript. |
+| `npm run lint` | Analyser le code avec ESLint. |
+| `npm run build` | Générer l’application de production dans `dist/`. |
+| `npm run preview` | Servir localement le résultat de la compilation. |
 
-### 4. Supabase Configuration
+Les composants du studio se trouvent dans `src/components/studio/`, le moteur dans `src/lib/`, les traitements en arrière-plan dans `src/workers/` et les thèmes dans `src/styles/` et `src/config/themes.ts`.
 
-Database schema and policies are managed via migrations in `supabase/migrations/`:
+Les tests sont regroupés dans [`tests/`](tests/README.md). Avant la première exécution navigateur, installez Chromium avec `npx playwright install chromium`. Les contrôles GitHub Actions et les propositions de mise à jour Dependabot sont décrits dans le [guide qualité GitHub](docs/github-quality.md).
 
-- `image_jobs` table with RLS policies
-- `profiles` table with user data
-- See `supabase/config.toml` for project settings
-
----
-
-## 🎯 Usage
-
-### Workflow
-
-1. **Upload Image** – Click upload in the left panel (supports raster + SVG)
-2. **Analyze Colors** – Click "Analyze image" to generate metrics and recommendations
-3. **Adjust Parameters** – Set number of colors, region size, smoothing, artistic effects
-4. **Process Image** – Run the processing pipeline (watch progress in real-time)
-5. **Explore Views** – Switch between visualization modes:
-   - `original` – Source image
-   - `contours` – Region boundaries
-   - `numbered` – Paint-by-numbers labels
-   - `colorized` – Flat color regions
-   - `compare` – Side-by-side comparison
-6. **Export Results** – Download PNG, JSON, SVG, or ZIP bundle
-
-### Routing
-
-```tsx
-// src/App.tsx
-<Routes>
-  <Route path="/" element={<Index />} />
-  <Route path="*" element={<NotFound />} />
-</Routes>
-```
-
----
-
-## 📁 Project Structure
-
-```
-.
-├── docs/
-│   ├── demo.png                    # Screenshot
-│   └── manual-tests.md             # Test scenarios
-├── public/                         # Static assets
-├── src/
-│   ├── components/
-│   │   ├── studio/                 # Main studio components
-│   │   └── ui/                     # shadcn/ui components
-│   ├── config/
-│   │   └── constants.ts            # App configuration
-│   ├── contexts/                   # React contexts
-│   ├── hooks/                      # Custom hooks
-│   ├── integrations/supabase/      # Supabase client & types
-│   ├── lib/                        # Utilities
-│   ├── pages/                      # Route pages
-│   ├── styles/                     # Global styles
-│   ├── types/                      # TypeScript definitions
-│   └── workers/                    # Web Workers
-├── supabase/
-│   ├── config.toml                 # Supabase config
-│   └── migrations/                 # SQL migrations
-├── package.json
-├── vite.config.ts
-├── tailwind.config.ts
-└── tsconfig.json
-```
-
----
-
-## 🔬 Processing Pipeline
-
-The application follows a **7-stage optimized pipeline**:
-
-1. **Normalization & Caching** – Image preprocessing and cache lookup
-2. **Color Quantization** – K-means++ clustering with ΔE2000 color distance
-3. **Region Segmentation** – Connected component analysis and merging
-4. **Contour Extraction** – Marching squares algorithm for boundaries
-5. **Label Placement** – Intelligent positioning using polylabel
-6. **Artistic Effects** – Paint texture, smoothing, and style filters
-7. **Multi-format Export** – PNG, JSON, SVG generation
-
-Each stage is profiled and monitored for performance optimization.
-
----
-
-## 📦 Export Formats
-
-### PNG
-High-resolution raster output with numbered regions.
-
-### JSON
-Structured data including:
-```json
-{
-  "palette": [...],
-  "regions": [...],
-  "metadata": {...}
-}
-```
-
-### SVG
-Vector format with:
-- Layered paths per color
-- Embedded palette
-- Scalable output
-
-### ZIP Bundle
-Combined package containing:
-- PNG render
-- JSON data
-- SVG vector
-- Metadata file
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Follow these steps:
-
-1. **Fork** the repository
-2. **Create** a feature branch:
-   ```bash
-   git checkout -b feature/amazing-feature
-   ```
-3. **Commit** your changes:
-   ```bash
-   git commit -m "feat: add amazing feature"
-   ```
-4. **Validate** your code:
-   ```bash
-   npm run lint
-   npm run build
-   ```
-5. **Test** manually using scenarios in `docs/manual-tests.md`
-6. **Push** to your branch:
-   ```bash
-   git push origin feature/amazing-feature
-   ```
-7. **Open** a Pull Request with a clear description
-
-### Code Guidelines
-
-- ✅ Use TypeScript strict mode
-- ✅ Avoid hardcoded colors (use HSL design tokens)
-- ✅ Document complex functions
-- ✅ Profile performance-critical code
-- ✅ Write clear commit messages (conventional commits)
-
----
-
-## 📄 License
-
-**MIT** © 2025
-
-See [LICENSE](./LICENSE) for details.
-
----
-
-## 👥 Authors & Contributors
-
-- **Franck** – Original author and maintainer
-- Open source contributors via Pull Requests
-
----
-
-## 🙏 Acknowledgments
-
-Built with amazing open-source tools:
-
-**React** • **TypeScript** • **Vite** • **Tailwind CSS** • **Supabase** • **shadcn/ui** • **Radix UI** • **Recharts** • **Martinez** • **Polylabel** • **Simplify.js** • **JSZip**
-
-Thank you to the open-source community ❤️
-
----
-
-**[⬆ Back to top](#-canvas-to-colors)**
+Pour aller plus loin : [scénarios de test manuel](docs/manual-tests.md), [thèmes CryptoKeep](docs/themes.md) et [référence du design](docs/studio-redesign.md).

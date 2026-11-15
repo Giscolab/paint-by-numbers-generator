@@ -10,7 +10,17 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+.e2e-dist/
+coverage/
+playwright-report/
+test-results/
+blob-report/
 *.local
+
+# Local environment configuration: never commit credentials.
+.env
+.env.*
+!.env.example
 
 # Editor directories and files
 .vscode/*

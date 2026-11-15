@@ -33,20 +33,30 @@ export function writePngDpi(bytes: Uint8Array, dpi: number): Uint8Array {
   const pieces: Uint8Array[] = [bytes.slice(0, 8)];
   let pos = 8;
   let inserted = false;
+  let hasImageData = false;
+  let hasEnd = false;
   while (pos + 12 <= bytes.length) {
     const len = read32(bytes, pos);
     const end = pos + 12 + len;
     if (end > bytes.length) throw new Error("PNG tronqué.");
     const name = String.fromCharCode(...bytes.slice(pos + 4, pos + 8));
+    if (pos === 8 && (name !== "IHDR" || len !== 13)) throw new Error("PNG sans en-tête IHDR valide.");
+    if (name === "IDAT") hasImageData = true;
+    if (name === "IHDR" && inserted) throw new Error("PNG avec en-tête IHDR dupliqué.");
     if (name !== "pHYs") pieces.push(bytes.slice(pos, end));
     if (name === "IHDR" && !inserted) {
       pieces.push(chunk);
       inserted = true;
     }
     pos = end;
-    if (name === "IEND") break;
+    if (name === "IEND") {
+      if (len !== 0) throw new Error("Fin PNG invalide.");
+      hasEnd = true;
+      break;
+    }
   }
   if (!inserted) throw new Error("PNG sans en-tête IHDR.");
+  if (!hasEnd || !hasImageData || pos !== bytes.length) throw new Error("PNG tronqué ou structure invalide.");
   const result = new Uint8Array(pieces.reduce((n, part) => n + part.length, 0));
   let at = 0;
   for (const part of pieces) { result.set(part, at); at += part.length; }

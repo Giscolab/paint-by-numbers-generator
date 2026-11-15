@@ -225,6 +225,9 @@ export function deltaE2000(
  * Convert RGB color to hex string
  */
 export function rgbToHex(r: number, g: number, b: number): string {
+  r = clampRgb(r);
+  g = clampRgb(g);
+  b = clampRgb(b);
   return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
 }
 

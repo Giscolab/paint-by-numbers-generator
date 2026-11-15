@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { IMAGE_PROCESSING } from "@/config/constants";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { DEFAULT_IMAGE_HOSTS, parseTrustedImageUrl } from "../../supabase/functions/fetch-image-url/urlSecurity";
 import { WebcamCapture } from "@/components/WebcamCapture";
 
 interface ImageUploadProps {
@@ -19,6 +20,44 @@ interface ImageUploadProps {
 const ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/webp", "image/svg+xml"];
 const isSupportedFile = (file: File) =>
   ACCEPTED_TYPES.includes(file.type) || file.name.toLowerCase().endsWith(".svg");
+
+/** Bound direct, CORS-permitted downloads before building a Blob in memory. */
+async function readDirectImage(response: Response): Promise<Blob> {
+  const mime = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+  const type = mime === "image/jpg" ? "image/jpeg" : mime;
+  if (!["image/png", "image/jpeg", "image/webp"].includes(type)) {
+    throw new Error("Seuls les fichiers PNG, JPEG et WebP sont acceptés depuis une URL.");
+  }
+  if (Number(response.headers.get("content-length") ?? 0) > IMAGE_PROCESSING.MAX_FILE_SIZE_BYTES) {
+    throw new Error("Image trop volumineuse (20 Mio maximum).");
+  }
+  if (!response.body) {
+    const blob = await response.blob();
+    if (blob.size > IMAGE_PROCESSING.MAX_FILE_SIZE_BYTES) throw new Error("Image trop volumineuse (20 Mio maximum).");
+    return new Blob([blob], { type });
+  }
+  const reader = response.body.getReader();
+  const chunks: ArrayBuffer[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > IMAGE_PROCESSING.MAX_FILE_SIZE_BYTES) {
+        await reader.cancel().catch(() => {});
+        throw new Error("Image trop volumineuse (20 Mio maximum).");
+      }
+      const chunk = new Uint8Array(value.byteLength);
+      chunk.set(value);
+      chunks.push(chunk.buffer);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return new Blob(chunks, { type });
+}
+
 
 export const ImageUpload = ({ onImageSelect, selectedImage, currentFile, onReset }: ImageUploadProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -124,29 +163,46 @@ export const ImageUpload = ({ onImageSelect, selectedImage, currentFile, onReset
     if (!url) return;
 
     try {
-      const parsed = new URL(url);
-      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Protocole interdit');
-    } catch {
-      toast({ title: "URL invalide", description: "Veuillez entrer une adresse HTTP ou HTTPS valide.", variant: "destructive" });
+      parseTrustedImageUrl(url, DEFAULT_IMAGE_HOSTS);
+    } catch (error) {
+      toast({
+        title: "Adresse d'image non autorisée",
+        description: error instanceof Error ? error.message : "Adresse HTTPS invalide.",
+        variant: "destructive",
+      });
       return;
     }
 
     setIsLoadingUrl(true);
     try {
-      // Try direct fetch first
+      // Direct CORS request only to explicitly trusted HTTPS image hosts.
       let blob: Blob;
       try {
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error("CORS or HTTP error");
-        const declaredSize = Number(resp.headers.get('content-length'));
-        if (declaredSize > IMAGE_PROCESSING.MAX_FILE_SIZE_BYTES) throw new Error('Image trop volumineuse (20 Mo maximum)');
-        blob = await resp.blob();
-      } catch {
-        // Fallback to edge function proxy
+        const resp = await fetch(url, {
+          redirect: "error",
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!resp.ok) throw new Error("L'hôte ne permet pas le téléchargement direct.");
+        blob = await readDirectImage(resp);
+      } catch (directError) {
+        if (directError instanceof Error && directError.message.startsWith("Image trop volumineuse")) {
+          throw directError;
+        }
+        // The Edge Function uses the same host allowlist and rejects redirects.
         const { data, error } = await supabase.functions.invoke("fetch-image-url", {
           body: { url },
         });
-        if (error) throw new Error(error.message || "Erreur proxy");
+        if (error) {
+          let reason = error.message || "Erreur de téléchargement distant.";
+          if (error.context instanceof Response) {
+            try {
+              const details: unknown = await error.context.clone().json();
+              if (details && typeof details === "object" && "error" in details &&
+                  typeof details.error === "string") reason = details.error;
+            } catch { /* Preserve the original HTTP error. */ }
+          }
+          throw new Error(reason);
+        }
         blob = data as Blob;
       }
 

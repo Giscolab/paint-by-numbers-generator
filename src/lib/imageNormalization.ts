@@ -6,53 +6,62 @@
 /**
  * Get EXIF orientation from image file
  */
-async function getOrientation(file: File): Promise<number> {
-  return new Promise((resolve) => {
+export async function getOrientation(file: File): Promise<number> {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Impossible de lire les métadonnées de l’image.'));
+    reader.onabort = () => reject(new DOMException('Lecture annulée.', 'AbortError'));
     reader.onload = (e) => {
-      const view = new DataView(e.target?.result as ArrayBuffer);
-      if (view.getUint16(0, false) !== 0xFFD8) {
-        resolve(1); // Not a JPEG
-        return;
-      }
-      
-      const length = view.byteLength;
-      let offset = 2;
-      
-      while (offset < length) {
-        if (view.getUint16(offset + 2, false) <= 8) {
-          resolve(1);
+      try {
+        const view = new DataView(e.target?.result as ArrayBuffer);
+        if (view.byteLength < 2 || view.getUint16(0, false) !== 0xFFD8) {
+          resolve(1); // Not a JPEG
           return;
         }
-        const marker = view.getUint16(offset, false);
-        offset += 2;
-        
-        if (marker === 0xFFE1) {
-          // EXIF marker
-          if (view.getUint32(offset += 2, false) !== 0x45786966) {
+
+        const length = view.byteLength;
+        let offset = 2;
+
+        while (offset < length) {
+          if (view.getUint16(offset + 2, false) <= 8) {
             resolve(1);
             return;
           }
-          
-          const little = view.getUint16(offset += 6, false) === 0x4949;
-          offset += view.getUint32(offset + 4, little);
-          const tags = view.getUint16(offset, little);
+          const marker = view.getUint16(offset, false);
           offset += 2;
-          
-          for (let i = 0; i < tags; i++) {
-            if (view.getUint16(offset + (i * 12), little) === 0x0112) {
-              const orientation = view.getUint16(offset + (i * 12) + 8, little);
-              resolve(orientation);
+
+          if (marker === 0xFFE1) {
+            // EXIF marker
+            if (view.getUint32(offset += 2, false) !== 0x45786966) {
+              resolve(1);
               return;
             }
+
+            const little = view.getUint16(offset += 6, false) === 0x4949;
+            offset += view.getUint32(offset + 4, little);
+            const tags = view.getUint16(offset, little);
+            offset += 2;
+
+            for (let i = 0; i < tags; i++) {
+              if (view.getUint16(offset + (i * 12), little) === 0x0112) {
+                const orientation = view.getUint16(offset + (i * 12) + 8, little);
+                resolve(orientation >= 1 && orientation <= 8 ? orientation : 1);
+                return;
+              }
+            }
+          } else if ((marker & 0xFF00) !== 0xFF00) {
+            break;
+          } else {
+            offset += view.getUint16(offset, false);
           }
-        } else if ((marker & 0xFF00) !== 0xFF00) {
-          break;
-        } else {
-          offset += view.getUint16(offset, false);
         }
+        resolve(1);
+      } catch (error) {
+        // Truncated or malformed EXIF must not leave import pending. The image
+        // decoder will independently reject an unreadable image afterwards.
+        if (error instanceof RangeError) resolve(1);
+        else reject(error);
       }
-      resolve(1);
     };
     reader.readAsArrayBuffer(file);
   });
@@ -111,29 +120,29 @@ export async function normalizeImage(
   maxDimension: number = 2048
 ): Promise<{ dataUrl: string; width: number; height: number }> {
   const orientation = await getOrientation(file);
-  
+
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    
+
     reader.onerror = () => reject(new Error('Failed to read image file'));
-    
+
     reader.onload = (e) => {
       const img = new Image();
-      
+
       img.onerror = () => reject(new Error('Failed to load image'));
-      
+
       img.onload = () => {
         const { width, height } = img;
-        
+
         // Determine if orientation swaps dimensions
         const swapDimensions = orientation >= 5 && orientation <= 8;
         const originalWidth = swapDimensions ? height : width;
         const originalHeight = swapDimensions ? width : height;
-        
+
         // Calculate new dimensions
         let newWidth = originalWidth;
         let newHeight = originalHeight;
-        
+
         if (originalWidth > maxDimension || originalHeight > maxDimension) {
           if (originalWidth > originalHeight) {
             newWidth = maxDimension;
@@ -143,18 +152,18 @@ export async function normalizeImage(
             newWidth = Math.round((originalWidth * maxDimension) / originalHeight);
           }
         }
-        
+
         // Create canvas with potentially swapped dimensions
         const canvas = document.createElement('canvas');
         canvas.width = newWidth;
         canvas.height = newHeight;
-        
+
         const ctx = canvas.getContext('2d');
         if (!ctx) {
           reject(new Error('Failed to get canvas context'));
           return;
         }
-        
+
         // Apply orientation correction
         ctx.save();
         if (swapDimensions) {
@@ -162,23 +171,23 @@ export async function normalizeImage(
         } else {
           applyOrientation(ctx, orientation, newWidth, newHeight);
         }
-        
+
         // Draw image with proper scaling
         const drawWidth = swapDimensions ? newHeight : newWidth;
         const drawHeight = swapDimensions ? newWidth : newHeight;
         ctx.drawImage(img, 0, 0, drawWidth, drawHeight);
         ctx.restore();
-        
+
         resolve({
           dataUrl: canvas.toDataURL('image/jpeg', 0.95),
           width: newWidth,
           height: newHeight
         });
       };
-      
+
       img.src = e.target?.result as string;
     };
-    
+
     reader.readAsDataURL(file);
   });
 }

@@ -67,7 +67,7 @@ export class LRUCache<T> {
     // Evict oldest if at capacity
     if (this.cache.size >= this.maxSize) {
       const oldest = this.cache.keys().next().value;
-      if (oldest) {
+      if (oldest !== undefined) {
         this.cache.delete(oldest);
         this.log('🗑️ Evicted oldest:', oldest);
       }
@@ -123,7 +123,7 @@ export class LRUCache<T> {
     const now = Date.now();
     
     const oldestAge = entries.length > 0
-      ? Math.min(...entries.map(e => now - e.timestamp))
+      ? Math.max(...entries.map(e => now - e.timestamp))
       : null;
     
     return {

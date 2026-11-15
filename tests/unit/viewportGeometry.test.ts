@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampPan, clampZoom, clientPointToImage, fitZoom } from '../viewportGeometry';
+import { clampPan, clampZoom, clientPointToImage, fitZoom } from '@/lib/viewportGeometry';
 
 describe('navigation du plan de travail',()=>{
   it('permet de zoomer au-delà de l’ajustement',()=>{expect(fitZoom(1200,800,600,400)).toBe(50);expect(clampZoom(200)).toBe(200);expect(clampZoom(900)).toBe(800);});
