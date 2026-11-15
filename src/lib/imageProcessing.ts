@@ -9,6 +9,7 @@ import { LRUCache } from './lruCache';
 import { createCanvasFactory, type Canvas2DContext } from './canvasFactory';
 import { analysisPipeline } from './analysisPipeline';
 import { renderPipeline } from './renderPipeline';
+import { processingCacheKey, imageFingerprint, quantizePerceptually, mergeSmallRegions, placeRegionLabels, validateModelParameters, flattenOnWhite, type LabelPlacement } from './pbnModel';
 
 // Image processing utilities for paint-by-numbers conversion
 // Enhanced with ΔE2000 perceptual color distance, adaptive simplification, and parametric caching
@@ -21,6 +22,7 @@ export interface Zone {
   area: number;
   pixels: Uint32Array;
   centroid: { x: number; y: number };
+  label?: LabelPlacement;
 }
 
 export interface LegendEntry {
@@ -77,6 +79,7 @@ export interface Recommendations {
 }
 
 export interface ProcessedResult {
+  original?: ImageData;
   contours: ImageData | null;
   numbered: ImageData | null;
   colorized: ImageData | null;
@@ -95,6 +98,7 @@ export interface ProcessedResult {
     height: number;
     cacheKey: string;
     wasCached: boolean;
+    unnumberedZoneCount?: number;
     averageDeltaE?: number; // ΔE moyen après correction de palette
   };
 }
@@ -138,6 +142,7 @@ interface CacheKey {
   smoothness: number;
   mergeTolerance: number;
   enableArtisticMerge: boolean;
+  enableSmartPalette: boolean;
 }
 
 interface CacheEntry {
@@ -154,28 +159,11 @@ const resultCache = new LRUCache<ProcessedResult>(5, 10 * 60 * 1000, false);
  * Generate cache key from parameters
  */
 function generateCacheKey(params: CacheKey): string {
-  return `${params.imageHash}_${params.numColors}_${params.minRegionSize}_${params.smoothness}_${params.mergeTolerance}_${params.enableArtisticMerge ? 1 : 0}`;
+  return processingCacheKey(params.imageHash, params);
 }
 
-/**
- * Hash image data for cache key using stable CRC32-like algorithm
- */
 async function hashImageData(imageData: ImageData): Promise<string> {
-  // Use first 1000 pixels for fast hash
-  const sample = imageData.data.slice(0, 4000);
-  
-  // CRC32-like stable hash
-  let hash = 0;
-  for (let i = 0; i < sample.length; i++) {
-    hash = ((hash << 5) - hash) + sample[i];
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  
-  // Add dimensions to ensure uniqueness
-  const dimensionHash = ((imageData.width << 16) | imageData.height) >>> 0;
-  const finalHash = (hash ^ dimensionHash) >>> 0;
-  
-  return `${finalHash.toString(36)}_${imageData.width}_${imageData.height}`;
+  return imageFingerprint(imageData);
 }
 
 /**
@@ -360,7 +348,7 @@ export async function analyzeImageColors(
   const { width, height } = bitmap;
   const { ctx } = canvasFactory.createCanvas(width, height);
   ctx.drawImage(bitmap, 0, 0);
-  const imageData = ctx.getImageData(0, 0, width, height);
+  const imageData = flattenOnWhite(ctx.getImageData(0, 0, width, height));
   bitmap.close();
 
   // === 2️⃣ Comptage précis (sans quantification ni échantillonnage) ===
@@ -499,11 +487,15 @@ export function getRecommendationsFromAnalysis(
     weightedColors * (0.9 + clampNumber(edgeDensity, 0, 1) * 0.3)
   );
   recommendedNumColors = Math.round(
-    clampNumber(recommendedNumColors, 8, analysis.mode === "vector" ? 24 : 64)
+    clampNumber(recommendedNumColors, 1, analysis.mode === "vector" ? 24 : 32)
   );
 
-  const baseMinRegion =
-    totalPixels * (0.00002 + clampNumber(edgeDensity, 0, 1) * 0.00012);
+  if (analysis.mode === 'photo' && uniqueCount > 32) {
+    // A photographic histogram contains thousands of JPEG/shading variants,
+    // not thousands of useful paint colors. This is a practical starting point.
+    recommendedNumColors = Math.round((12 + complexityScore * 0.2) / 4) * 4;
+  }
+  const baseMinRegion = totalPixels * (0.00025 + clampNumber(edgeDensity, 0, 1) * 0.0005);
   let recommendedMinRegionSize = Math.round(clampNumber(baseMinRegion, 5, 500));
 
   if (typeInfo?.type === "technical" || typeInfo?.type === "drawing") {
@@ -564,8 +556,10 @@ export function getRecommendationsFromAnalysis(
     }
   }
 
+  recommendedNumColors = Math.min(uniqueCount, Math.round(clampNumber(recommendedNumColors, 1, mode === 'vector' ? 14 : 32)));
+  recommendedMinRegionSize = Math.round(clampNumber(Math.round(recommendedMinRegionSize / 10) * 10, 0, 500));
   const reasons = {
-    numColors: `Couvre ~95% des pixels avec ${coverageColors} couleurs dominantes, ajusté par l'entropie (${complexityScore}/100).${signalReasons.length > 0 ? ' ' + signalReasons.join(' ') : ''}`,
+    numColors: `Point de départ pour un modèle à peindre, selon la complexité (${complexityScore}/100). Les ${uniqueCount} teintes exactes ne correspondent pas à autant de peintures.${signalReasons.length > 0 ? ' ' + signalReasons.join(' ') : ''}`,
     minRegionSize: `Basé sur la densité d'arêtes ${(edgeDensity * 100).toFixed(1)}% et la résolution.${bs && _avgSpectralMetric(bs.spectral, 'highFreqEnergyRatio') > 0.85 ? ' Ajusté pour le bruit HF.' : ''}`,
     deltaE: `Ajusté pour la complexité ${complexityScore}/100 et la densité de contours.`,
     mode: `Recommandé car le profil détecté est "${mode}"${analysis.sourceType === "vector" ? " (source SVG/Vectorielle)" : ""}.`,
@@ -593,7 +587,7 @@ function _avgStatMetric(
   key: 'kurtosis' | 'skewness'
 ): number {
   const vals = Object.values(stats);
-  return vals.length > 0 ? vals.reduce((s, v) => s + (v as any)[key], 0) / vals.length : 0;
+  return vals.length > 0 ? vals.reduce((s, v) => s + v[key], 0) / vals.length : 0;
 }
 
 
@@ -692,106 +686,7 @@ export function consolidateColorMap(
  * Quantize image colors using K-means++ clustering
  */
 export function quantizeColors(imageData: ImageData, numColors: number): string[] {
-  const { data, width, height } = imageData;
-  const totalPixels = width * height;
-
-  // Sampling for large images (max 50000 samples)
-  const maxSamples = Math.min(totalPixels, 50000);
-  const step = Math.max(1, Math.floor(totalPixels / maxSamples));
-
-  const samples: Array<[number, number, number]> = [];
-  for (let i = 0; i < totalPixels; i += step) {
-    const base = i * 4;
-    samples.push([data[base], data[base + 1], data[base + 2]]);
-  }
-
-  // K-means++ initialization
-  const centers: Array<[number, number, number]> = [];
-  const rng = () => Math.random(); // Seed would be nice but not critical
-
-  // First center: random sample
-  centers.push(samples[Math.floor(rng() * samples.length)]);
-
-  // Remaining centers: proportional to D²
-  for (let c = 1; c < numColors; c++) {
-    const distances = samples.map(s => {
-      let minDist = Infinity;
-      for (const center of centers) {
-        const dr = s[0] - center[0];
-        const dg = s[1] - center[1];
-        const db = s[2] - center[2];
-        const dist = dr * dr + dg * dg + db * db;
-        if (dist < minDist) minDist = dist;
-      }
-      return minDist;
-    });
-
-    const totalDist = distances.reduce((a, b) => a + b, 0);
-    if (totalDist === 0) break;
-
-    let r = rng() * totalDist;
-    let chosen = 0;
-    for (let i = 0; i < distances.length; i++) {
-      r -= distances[i];
-      if (r <= 0) {
-        chosen = i;
-        break;
-      }
-    }
-    centers.push(samples[chosen]);
-  }
-
-  // K-means iterations
-  const maxIterations = 20;
-  for (let iter = 0; iter < maxIterations; iter++) {
-    const sums: Array<[number, number, number]> = centers.map(() => [0, 0, 0]);
-    const counts = new Array(centers.length).fill(0);
-
-    for (const sample of samples) {
-      let minDist = Infinity;
-      let minIdx = 0;
-      for (let c = 0; c < centers.length; c++) {
-        const dr = sample[0] - centers[c][0];
-        const dg = sample[1] - centers[c][1];
-        const db = sample[2] - centers[c][2];
-        const dist = dr * dr + dg * dg + db * db;
-        if (dist < minDist) {
-          minDist = dist;
-          minIdx = c;
-        }
-      }
-      sums[minIdx][0] += sample[0];
-      sums[minIdx][1] += sample[1];
-      sums[minIdx][2] += sample[2];
-      counts[minIdx]++;
-    }
-
-    let converged = true;
-    for (let c = 0; c < centers.length; c++) {
-      if (counts[c] === 0) continue;
-      const newR = sums[c][0] / counts[c];
-      const newG = sums[c][1] / counts[c];
-      const newB = sums[c][2] / counts[c];
-      if (
-        Math.abs(newR - centers[c][0]) > 1 ||
-        Math.abs(newG - centers[c][1]) > 1 ||
-        Math.abs(newB - centers[c][2]) > 1
-      ) {
-        converged = false;
-      }
-      centers[c] = [newR, newG, newB];
-    }
-
-    if (converged) break;
-  }
-
-  // Convert to hex
-  return centers
-    .filter((_, i) => {
-      // Remove empty clusters
-      return true; // Keep all since we already handled empty clusters
-    })
-    .map(([r, g, b]) => rgbToHex(Math.round(r), Math.round(g), Math.round(b)));
+  return quantizePerceptually(imageData, numColors);
 }
 
 /**
@@ -1092,125 +987,10 @@ export function mergeSimilarAdjacentZones(
  * Optimized with zone maps for faster lookups
  */
 export function mergeSmallZones(
-  zones: Zone[],
-  labels: Int32Array,
-  palette: string[],
-  width: number,
-  height: number,
-  minRegionSize: number
+  zones: Zone[], labels: Int32Array, palette: string[], width: number, height: number, minRegionSize: number
 ): { mergedLabels: Int32Array; mergedZones: Zone[] } {
-  const mergedLabels = new Int32Array(labels);
-  const minAreaThreshold = Math.max(minRegionSize, 20);
-
-  const zoneMap = new Map<number, Zone>();
-  for (const z of zones) zoneMap.set(z.id, z);
-
-  // Cache ΔE entre couleurs
-  const colorCache = new Map<string, number>();
-  const getColorDistance = (idxA: number, idxB: number) => {
-    const key = `${idxA}-${idxB}`;
-    if (colorCache.has(key)) return colorCache.get(key)!;
-    const [r1, g1, b1] = hexToRgb(palette[idxA]);
-    const [r2, g2, b2] = hexToRgb(palette[idxB]);
-    const d = Math.sqrt(
-      (r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2
-    );
-    colorCache.set(key, d);
-    return d;
-  };
-
-  // 🔹 Construire une carte de voisinage persistante
-  const neighborsByZone = new Map<number, Set<number>>();
-  for (const zone of zones) {
-    const set = new Set<number>();
-    for (const p of zone.pixels) {
-      const x = p % width;
-      const y = Math.floor(p / width);
-      for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-        const nx = x + dx, ny = y + dy;
-        if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
-        const neighborId = mergedLabels[ny * width + nx];
-        if (neighborId !== zone.id && neighborId !== -1) set.add(neighborId);
-      }
-    }
-    neighborsByZone.set(zone.id, set);
-  }
-
-  // 🔹 Pré-calcul de la compacité de chaque zone
-  const compactnessCache = new Map<number, number>();
-  const calcCompactness = (zone: Zone): number => {
-    if (compactnessCache.has(zone.id)) return compactnessCache.get(zone.id)!;
-    const pixelSet = new Set(zone.pixels);
-    let perim = 0;
-    for (const idx of zone.pixels) {
-      const x = idx % width, y = Math.floor(idx / width);
-      for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-        const nx = x + dx, ny = y + dy;
-        if (nx < 0 || nx >= width || ny < 0 || ny >= height || !pixelSet.has(ny * width + nx)) {
-          perim++;
-        }
-      }
-    }
-    const compact = zone.area > 0 ? (perim * perim) / zone.area : Infinity;
-    compactnessCache.set(zone.id, compact);
-    return compact;
-  };
-
-  // 🔹 Fusion par batch
-  const smallZones = zones.filter(z => z.area < minAreaThreshold);
-  const merges: Array<{ donor: number; recipient: number }> = [];
-
-  for (const z of smallZones) {
-    const neighbors = neighborsByZone.get(z.id);
-    if (!neighbors || neighbors.size === 0) continue;
-
-    let bestId = -1, bestScore = Infinity;
-    const zColor = z.colorIdx;
-    const zCompact = calcCompactness(z);
-
-    for (const nId of neighbors) {
-      const nZone = zoneMap.get(nId);
-      if (!nZone) continue;
-      const colorDist = getColorDistance(zColor, nZone.colorIdx);
-      const nCompact = calcCompactness(nZone);
-      const score = colorDist * 0.8 + nCompact * 0.2;
-      if (score < bestScore) {
-        bestScore = score;
-        bestId = nId;
-      }
-    }
-
-    if (bestId !== -1) merges.push({ donor: z.id, recipient: bestId });
-  }
-
-  // 🔹 Appliquer les fusions
-  for (const { donor, recipient } of merges) {
-    const donorZone = zoneMap.get(donor);
-    const recZone = zoneMap.get(recipient);
-    if (!donorZone || !recZone) continue;
-
-    for (const p of donorZone.pixels) mergedLabels[p] = recipient;
-
-    // Fusionner les pixels
-    const newPixels = new Uint32Array(recZone.pixels.length + donorZone.pixels.length);
-    newPixels.set(recZone.pixels);
-    newPixels.set(donorZone.pixels, recZone.pixels.length);
-    recZone.pixels = newPixels;
-    recZone.area = newPixels.length;
-
-    // Mise à jour des voisins
-    const mergedNeighbors = new Set([
-      ...(neighborsByZone.get(recipient) ?? []),
-      ...(neighborsByZone.get(donor) ?? []),
-    ]);
-    mergedNeighbors.delete(donor);
-    mergedNeighbors.delete(recipient);
-    neighborsByZone.set(recipient, mergedNeighbors);
-    neighborsByZone.delete(donor);
-  }
-
-  const mergedZones = buildZonesFromLabels(mergedLabels, palette, width, height, zones);
-  return { mergedLabels, mergedZones };
+  const mergedLabels = mergeSmallRegions(zones, labels, palette, width, height, minRegionSize);
+  return { mergedLabels, mergedZones: buildZonesFromLabels(mergedLabels, palette, width, height, zones) };
 }
 
 // ============= MORPHOLOGICAL SMOOTHING =============
@@ -1668,9 +1448,9 @@ export function traceContours(
 
       // Filter out micro-contours (parasitic noise)
       const area = calculatePolygonArea(path);
-      if (area < 10) continue;
+      if (area <= 0) continue;
 
-      const simplifiedPath = simplifyPath(path); // Adaptive simplification based on area
+      const simplifiedPath = simplifyPath(path, 0); // Preserve holes and narrow boundaries.
       if (simplifiedPath.length >= 3) {
         contours.push({ zoneId: zone.id, path: simplifiedPath });
       }
@@ -1702,43 +1482,17 @@ function generateFallbackSVG(
 /**
  * Generate SVG from contours
  */
-export function generateSVG(
-  contours: Contour[],
-  zones: Zone[],
-  palette: string[],
-  width: number,
-  height: number
-): string {
-  // Dynamic SVG limit based on average contour complexity
-  const avgContourComplexity = contours.length > 0 
-    ? contours.reduce((sum, c) => sum + c.path.length, 0) / contours.length 
-    : 10;
-  const MAX_CONTOURS_FOR_SVG = Math.floor(Math.min(2000, 50000 / Math.max(1, avgContourComplexity)));
-  
-  if (contours.length > MAX_CONTOURS_FOR_SVG) {
-    console.warn(`Too many contours (${contours.length}, avg complexity: ${avgContourComplexity.toFixed(1)}). Generating simplified SVG.`);
-    return generateFallbackSVG(width, height, contours.length);
-  }
-  
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">\n`;
-  svg += `  <g id="zones">\n`;
-  
+export function generateSVG(contours: Contour[], zones: Zone[], palette: string[], width: number, height: number): string {
+  const byZone = new Map<number, Contour[]>();
   for (const contour of contours) {
-    const zone = zones.find(z => z.id === contour.zoneId);
-    if (!zone || contour.path.length < 3) continue;
-    
-    const color = palette[zone.colorIdx];
-    const pathData = contour.path.map((p, i) => 
-      `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`
-    ).join(' ') + ' Z';
-    
-    svg += `    <path d="${pathData}" fill="${color}" stroke="#000" stroke-width="0.5" data-id="${zone.id}" data-hex="${color}" />\n`;
+    if (!byZone.has(contour.zoneId)) byZone.set(contour.zoneId, []);
+    byZone.get(contour.zoneId)!.push(contour);
   }
-  
-  svg += `  </g>\n`;
-  svg += `</svg>`;
-  
-  return svg;
+  const paths = zones.map(zone => {
+    const d = (byZone.get(zone.id) ?? []).map(contour => contour.path.map((p,i) => `${i ? 'L' : 'M'}${p.x},${p.y}`).join(' ')+' Z').join(' ');
+    return d ? `<path d="${d}" fill="${palette[zone.colorIdx]}" fill-rule="evenodd" stroke="#000" stroke-width="0.5" data-id="${zone.id}" data-hex="${palette[zone.colorIdx]}"/>` : '';
+  }).join('\n');
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><g id="zones">${paths}</g></svg>`;
 }
 
 // ============= NUMBERED VERSION =============
@@ -1820,87 +1574,34 @@ function findBestLabelPosition(
  * colorisé) afin que tous les onglets partagent exactement le même cadrage et le
  * même rendu. Un voile blanc léger est appliqué pour garder les numéros lisibles.
  */
-export function createNumberedVersion(
-  imageData: ImageData,
-  zones: Zone[],
-  palette: string[],
-  labels: Int32Array,
-  contoursData: ImageData
-): ImageData {
-  const width = imageData.width;
-  const height = imageData.height;
-
+export function createNumberedVersion(imageData: ImageData, zones: Zone[], _palette: string[], labels: Int32Array, contoursData: ImageData): ImageData {
+  const { width, height } = imageData;
+  if (contoursData.width !== width || contoursData.height !== height) throw new Error('Contours invalides pour la version numérotée.');
   const { ctx } = canvasFactory.createCanvas(width, height);
-
-  // Base = image de référence (source de vérité commune à tous les onglets)
-  ctx.putImageData(imageData, 0, 0);
-
-  // Voile blanc pour la lisibilité des numéros
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
-  ctx.fillRect(0, 0, width, height);
-
-  if (contoursData.width !== width || contoursData.height !== height) {
-    throw new Error('Contours invalides pour la version numérotée.');
-  }
-  const edgesData = contoursData;
-  ctx.fillStyle = '#000000';
-  for (let i = 0; i < edgesData.data.length; i += 4) {
-    if (edgesData.data[i] === 0) { // Black pixel = edge
-      const pixelIdx = i / 4;
-      const x = pixelIdx % width;
-      const y = Math.floor(pixelIdx / width);
-      ctx.fillRect(x, y, 1, 1);
-    }
-  }
-
+  ctx.putImageData(contoursData, 0, 0);
   drawZoneNumbers(ctx, zones, labels, width, height);
-
   return ctx.getImageData(0, 0, width, height);
 }
 
 /**
  * Dessine les numéros de zones (pastille blanche + chiffre noir) sur un contexte donné.
  */
-function drawZoneNumbers(
-  ctx: Canvas2DContext,
-  zones: Zone[],
-  labels: Int32Array,
-  width: number,
-  height: number
-): void {
+function drawZoneNumbers(ctx: Canvas2DContext, zones: Zone[], labels: Int32Array, width: number, height: number): void {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-
+  const placements = zones.some(zone => !('label' in zone)) ? placeRegionLabels(labels, zones, width, height) : new Map<number, LabelPlacement>();
   for (const zone of zones) {
-    if (zone.area < 100) continue; // Skip tiny zones
-
-    // Use palette index as number (matching ColorPalette component)
-    const number = zone.colorIdx + 1;
-
-    // Calculate font size based on zone area
-    const fontSize = Math.max(10, Math.min(48, Math.sqrt(zone.area) / 3));
-    ctx.font = `bold ${fontSize}px Arial`;
-
-    // Use optimal position
-    const position = findBestLabelPosition(zone, labels, width, height);
-
-    // Semi-transparent white background for better visibility on all colors
-    const padding = fontSize * 0.4;
-    const textMetrics = ctx.measureText(number.toString());
-    const bgWidth = textMetrics.width + padding * 2;
-    const bgHeight = fontSize + padding;
-
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-    ctx.fillRect(
-      position.x - bgWidth / 2,
-      position.y - bgHeight / 2,
-      bgWidth,
-      bgHeight
-    );
-
-    // Black number
+    const placement = zone.label ?? placements.get(zone.id);
+    if (!placement) continue;
+    const text = String(zone.colorIdx + 1);
+    let fontSize = placement.fontSize;
+    ctx.font = `${fontSize}px Arial`;
+    while (fontSize >= 6 && ctx.measureText(text).width + 2 > placement.clearance * 2) {
+      ctx.font = `${--fontSize}px Arial`;
+    }
+    if (fontSize < 6) continue;
     ctx.fillStyle = '#000000';
-    ctx.fillText(number.toString(), position.x, position.y);
+    ctx.fillText(text, placement.x, placement.y);
   }
 }
 
@@ -2019,190 +1720,20 @@ export function generateGrayscaleMap(imageData: ImageData): Uint8Array {
 
 // ============= EDGE DETECTION =============
 
-export function detectEdges(
-  labels: Int32Array,
-  grayscaleMap: Uint8Array,
-  width: number,
-  height: number
-): ImageData {
-  if (!labels || !grayscaleMap) {
-    throw new Error("detectEdges: labels ou grayscaleMap manquant.");
-  }
-
-  const expectedSize = width * height;
-  if (width <= 0 || height <= 0) {
-    throw new Error("detectEdges: dimensions invalides.");
-  }
-  if (labels.length !== expectedSize || grayscaleMap.length !== expectedSize) {
-    throw new Error(
-      `detectEdges: taille incohérente (labels=${labels.length}, grayscale=${grayscaleMap.length}, attendu=${expectedSize}).`
-    );
-  }
-
-  const result = new ImageData(width, height);
-
-  // === 1️⃣ Fond blanc par défaut ===
-  // Micro-optimisation : fill() est bien plus rapide qu'une boucle for en JS.
+export function detectEdges(labels: Int32Array, grayscaleMap: Uint8Array, width: number, height: number): ImageData {
+  if (width <= 0 || height <= 0 || labels.length !== width*height || grayscaleMap.length !== width*height) throw new Error('Dimensions des contours incohérentes.');
+  const result = new ImageData(width,height);
   result.data.fill(255);
-
-  // --- Déclaration des kernels et constantes ---
-  const sobelXKernel = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
-  const sobelYKernel = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
-  const prewittXKernel = [-1, 0, 1, -1, 0, 1, -1, 0, 1];
-  const prewittYKernel = [-1, -1, -1, 0, 0, 0, 1, 1, 1];
-  const gaussianKernel = [1/16, 2/16, 1/16, 2/16, 4/16, 2/16, 1/16, 2/16, 1/16];
-
-  // Constantes pour le seuillage dynamique Canny
-  const HIGH_THRESHOLD_FACTOR = 1.0; // mean + std * factor
-  const LOW_THRESHOLD_RATIO = 0.5;   // mean * ratio
-
-  // Buffers intermédiaires pour le pipeline
-  const gradientMap = new Float32Array(width * height);
-  const angleMap = new Float32Array(width * height);
-  // edgeMap: 0 = non-bord, 1 = bord ΔE, 2 = bord Canny confirmé
-  const edgeMap = new Uint8Array(width * height);
-
-  // === 🟩 ZONE A – Préparation & Calculs Unifiés ===
-  // Boucle unique pour la détection ΔE et le calcul de gradient (Sobel + Prewitt).
-  // On itère de 1 à height-1/width-1 car les kernels 3x3 nécessitent un voisinage complet.
-  for (let y = 1; y < height - 1; y++) {
-    for (let x = 1; x < width - 1; x++) {
-      const idx = y * width + x;
-      const label = labels[idx];
-      if (label === -1) continue;
-
-      // --- Détection ΔE (transitions entre zones) ---
-      const n1 = labels[idx - 1], n2 = labels[idx + 1];
-      const n3 = labels[idx - width], n4 = labels[idx + width];
-      if ((n1 !== label && n1 !== -1) || (n2 !== label && n2 !== -1) ||
-          (n3 !== label && n3 !== -1) || (n4 !== label && n4 !== -1)) {
-        edgeMap[idx] = 1; // Marquer comme bord ΔE
-      }
-
-      // --- Gradient local (Sobel + Prewitt combiné) ---
-      let gxS = 0, gyS = 0, gxP = 0, gyP = 0;
-      let k = 0; // Optimisation : un seul compteur pour le kernel
-
-      for (let ky = -1; ky <= 1; ky++) {
-        const iy = (y + ky) * width;
-        for (let kx = -1; kx <= 1; kx++, k++) {
-          const val = grayscaleMap[iy + (x + kx)];
-          gxS += val * sobelXKernel[k];
-          gyS += val * sobelYKernel[k];
-          gxP += val * prewittXKernel[k];
-          gyP += val * prewittYKernel[k];
-        }
-      }
-
-      // --- Combinaison robuste des gradients ---
-      const gx = (gxS + gxP) * 0.5;
-      const gy = (gyS + gyP) * 0.5;
-      gradientMap[idx] = Math.hypot(gx, gy); // Équivalent à sqrt(gx*gx + gy*gy)
-      angleMap[idx] = Math.atan2(gy, gx);
+  // Only the final paint regions define boundaries. Photographic texture is not a paint boundary.
+  for(let y=0;y<height;y++) for(let x=0;x<width;x++) {
+    const i=y*width+x;
+    if(x===width-1 || y===height-1 || x===0 || y===0 || labels[i]!==labels[i+1] || labels[i]!==labels[i+width]) {
+      result.data[i*4]=result.data[i*4+1]=result.data[i*4+2]=0;
     }
   }
-
-  // Optionnel: Traitement des bords de l'image pour un rendu "plein cadre"
-  // for (let y = 0; y < height; y++) {
-  //   for (let x = 0; x < width; x++) {
-  //     if (x === 0 || x === width - 1 || y === 0 || y === height - 1) {
-  //       const idx = y * width + x;
-  //       if (labels[idx] !== -1) edgeMap[idx] = edgeMap[idx] || 1;
-  //     }
-  //   }
-  // }
-
-  // === 🟦 ZONE B – Pipeline Canny (Lissage & Nettoyage) ===
-
-  // 1. Flou gaussien léger pour réduire le bruit
-  const blurred = new Float32Array(width * height);
-  for (let y = 1; y < height - 1; y++) {
-    const wy = y * width;
-    for (let x = 1; x < width - 1; x++) {
-      let sum = 0, k = 0;
-      for (let ky = -1; ky <= 1; ky++) {
-        const iy = (y + ky) * width;
-        for (let kx = -1; kx <= 1; kx++, k++) {
-          sum += gradientMap[iy + (x + kx)] * gaussianKernel[k];
-        }
-      }
-      blurred[wy + x] = sum;
-    }
-  }
-
-  // 2. Suppression non-maximale (affiner les contours)
-  const suppressed = new Float32Array(width * height);
-  for (let y = 1; y < height - 1; y++) {
-    const wy = y * width;
-    for (let x = 1; x < width - 1; x++) {
-      const idx = wy + x;
-      const angle = ((angleMap[idx] * 180) / Math.PI + 180) % 180;
-      const mag = blurred[idx];
-
-      let q = 0, r = 0;
-      if ((angle < 22.5) || (angle >= 157.5)) {
-        q = blurred[idx + 1]; r = blurred[idx - 1];
-      } else if (angle < 67.5) {
-        q = blurred[idx - width + 1]; r = blurred[idx + width - 1];
-      } else if (angle < 112.5) {
-        q = blurred[idx + width]; r = blurred[idx - width];
-      } else {
-        q = blurred[idx - width - 1]; r = blurred[idx + width + 1];
-      }
-
-      suppressed[idx] = (mag >= q && mag >= r) ? mag : 0;
-    }
-  }
-
-  // 3. Seuillage dynamique + Hystérésis (éliminer les faux bords)
-  let sum = 0, sumSq = 0, n = 0;
-  for (const val of suppressed) if (val > 0) { sum += val; sumSq += val * val; n++; }
-  const mean = sum / n;
-  const std = Math.sqrt(sumSq / n - mean * mean);
-  const highThreshold = mean + std * HIGH_THRESHOLD_FACTOR;
-  const lowThreshold = mean * LOW_THRESHOLD_RATIO;
-
-  const cannyMask = new Uint8Array(width * height);
-  for (let i = 0; i < suppressed.length; i++) {
-    if (suppressed[i] > highThreshold) cannyMask[i] = 2; // Pixel fort
-    else if (suppressed[i] > lowThreshold) cannyMask[i] = 1; // Pixel faible
-  }
-
-  // Propagation des pixels faibles connectés à des pixels forts
-  for (let y = 1; y < height - 1; y++) {
-    const wy = y * width;
-    for (let x = 1; x < width - 1; x++) {
-      const idx = wy + x;
-      if (cannyMask[idx] !== 1) continue;
-
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          // ✅ Optimisation : éviter de vérifier le pixel central
-          if (dx === 0 && dy === 0) continue;
-          if (cannyMask[wy + dy * width + x + dx] === 2) {
-            cannyMask[idx] = 2;
-            edgeMap[idx] = 2; // Marquer comme bord Canny confirmé
-            break;
-          }
-        }
-        if (cannyMask[idx] === 2) break;
-      }
-    }
-  }
-
-  // === 🟨 ZONE C – Fusion & Rendu Final ===
-  // Une seule passe de rendu, en se basant sur la carte de bords unifiée.
-  for (let i = 0; i < width * height; i++) {
-    // La condition `edgeMap[i] > 0` couvre désormais les bords ΔE (1) et Canny (2).
-    if (edgeMap[i] > 0 && labels[i] !== -1) {
-      const o = i * 4;
-      result.data[o] = result.data[o + 1] = result.data[o + 2] = 0;
-      result.data[o + 3] = 255;
-    }
-  }
-
   return result;
 }
+
 // ============= MAIN PROCESSING PIPELINE =============
 
 /**
@@ -2219,11 +1750,14 @@ export async function processImage(
   onProgress?: (stage: string, progress: number) => void,
   enableSmartPalette: boolean = false
 ): Promise<ProcessedResult> {
-  const GLOBAL_TIMEOUT = 30000; // 30 seconds max
+  validateModelParameters({ numColors, minRegionSize, smoothness, mergeTolerance, enableArtisticMerge, enableSmartPalette });
+  const GLOBAL_TIMEOUT = 5 * 60 * 1000; // Worker supervision enforces the wall-clock limit.
   const startTime = Date.now();
   const progressLog: ProgressEvent[] = [];
+  let lastProgress = 0;
 
   const report = (stage: string, progress: number, detail?: string) => {
+    progress = lastProgress = Math.max(lastProgress, progress);
     const timestamp = Date.now() - startTime;
     const message = detail ? `${stage} — ${detail}` : stage;
     const event: ProgressEvent = { stage, progress, detail, timestamp };
@@ -2235,15 +1769,15 @@ export async function processImage(
     const timeoutId = setTimeout(() => {
       reject(
         new Error(
-          "Le traitement a dépassé le délai maximum de 30 secondes. Essayez avec une image plus petite ou moins de couleurs."
+          "Le traitement a dépassé le délai maximum de 5 minutes. Essayez avec une image plus petite ou moins de couleurs."
         )
       );
     }, GLOBAL_TIMEOUT);
 
     const run = async () => {
       try {
-        const effectiveMinRegionSize = Math.max(minRegionSize, 20);
-        const effectiveMergeTolerance = Math.max(mergeTolerance, 1);
+        const effectiveMinRegionSize = Math.max(0, Math.round(minRegionSize));
+        const effectiveMergeTolerance = Math.max(0, mergeTolerance);
 
         report(
           "Initialisation du traitement",
@@ -2266,6 +1800,7 @@ export async function processImage(
           smoothness,
           mergeTolerance: effectiveMergeTolerance,
           enableArtisticMerge,
+          enableSmartPalette,
         });
 
         const cached = getCachedResult(cacheKey);
@@ -2332,7 +1867,7 @@ export async function processImage(
 
         const safeZones = processed.zones.map((z) => ({
           ...z,
-          pixels: z.area < 20000 ? z.pixels.slice(0, 20000) : new Uint32Array(0),
+          pixels: z.pixels, // Preserve the complete region for inspection and vector export.
         }));
         console.log("Mapping couleurs:", processed.colorZoneMapping?.size ?? 0);
 
@@ -2354,6 +1889,7 @@ export async function processImage(
             height,
             cacheKey,
             wasCached: false,
+            unnumberedZoneCount: processed.zones.filter(zone => !zone.label).length,
             averageDeltaE
           },
         };

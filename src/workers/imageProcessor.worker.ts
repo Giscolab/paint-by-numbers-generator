@@ -3,7 +3,7 @@
  * Offloads heavy computation from main thread
  */
 
-import { processImage } from '@/lib/imageProcessing';
+import { processImage, type ProcessedResult } from '@/lib/imageProcessing';
 import { IMAGE_PROCESSING } from '@/config/constants';
 
 interface WorkerMessage {
@@ -21,7 +21,7 @@ interface WorkerMessage {
 
 interface WorkerResponse {
   type: 'success' | 'error' | 'progress' | 'done';
-  payload?: any;
+  payload?: ProcessedResult | { stage: string; progress: number };
   error?: string;
 }
 
@@ -84,6 +84,10 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       const blob = new Blob([arrayBuffer], { type: imageFile.type });
       const imageBitmap = await createImageBitmap(blob);
 
+      if (imageBitmap.width * imageBitmap.height > IMAGE_PROCESSING.MAX_PIXELS) {
+        imageBitmap.close();
+        throw new Error('Image trop grande : maximum 16 mégapixels.');
+      }
       const canvas = new OffscreenCanvas(imageBitmap.width, imageBitmap.height);
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("Impossible de créer le contexte 2D pour le décodage.");
@@ -98,6 +102,10 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       try {
         // Re-try with createImageBitmap from file directly
         const imageBitmapRetry = await createImageBitmap(imageFile);
+        if (imageBitmapRetry.width * imageBitmapRetry.height > IMAGE_PROCESSING.MAX_PIXELS) {
+          imageBitmapRetry.close();
+          throw new Error('Image trop grande : maximum 16 mégapixels.');
+        }
         const retryCanvas = new OffscreenCanvas(imageBitmapRetry.width, imageBitmapRetry.height);
         const retryCtx = retryCanvas.getContext("2d");
         if (!retryCtx) throw new Error("Impossible de créer le contexte 2D (fallback).");

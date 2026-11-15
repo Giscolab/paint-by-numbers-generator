@@ -39,10 +39,10 @@ export function WebcamCapture({ open, onOpenChange, onCapture }: WebcamCapturePr
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
-    } catch (err: any) {
-      if (err.name === "NotAllowedError") {
+    } catch (err: unknown) {
+      if ((err instanceof Error ? err.name : "") === "NotAllowedError") {
         setError("Permission caméra refusée. Autorisez l'accès dans les paramètres du navigateur.");
-      } else if (err.name === "NotFoundError") {
+      } else if ((err instanceof Error ? err.name : "") === "NotFoundError") {
         setError("Aucune caméra détectée sur cet appareil.");
       } else {
         setError("Impossible d'accéder à la caméra.");

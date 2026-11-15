@@ -123,7 +123,7 @@ export async function normalizeImage(
       img.onerror = () => reject(new Error('Failed to load image'));
       
       img.onload = () => {
-        let { width, height } = img;
+        const { width, height } = img;
         
         // Determine if orientation swaps dimensions
         const swapDimensions = orientation >= 5 && orientation <= 8;

@@ -1,4 +1,6 @@
 @import "./styles/theme-pro.css";
+@import "./styles/cryptokeep-themes.css";
+@import "./styles/atelier.css";
 
 @tailwind base;
 @tailwind components;

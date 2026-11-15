@@ -58,12 +58,9 @@ function addImagePage(
   doc.setFontSize(14);
   doc.text(title, MARGIN, MARGIN + 8);
 
-  // Load image dimensions from dataUrl
-  const img = new Image();
-  img.src = dataUrl;
-
-  const imgW = img.naturalWidth || usableW;
-  const imgH = img.naturalHeight || usableH;
+  // jsPDF reads the PNG header synchronously; a newly-created HTMLImageElement has
+  // naturalWidth=0 until load and used to distort every exported aspect ratio.
+  const { width: imgW, height: imgH } = doc.getImageProperties(dataUrl);
   const ratio = Math.min(usableW / imgW, usableH / imgH, 1);
   const drawW = imgW * ratio;
   const drawH = imgH * ratio;

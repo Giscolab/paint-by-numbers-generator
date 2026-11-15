@@ -95,7 +95,7 @@ function getSpectralWorker(): Worker {
  * Compute spectral energy via Web Worker (async, non-blocking).
  * Falls back to sync computation if Workers are unavailable.
  */
-function computeSpectralViaWorker(
+function runSpectralWorker(
   channels: Float64Array[],
   width: number,
   height: number
@@ -136,6 +136,14 @@ function computeSpectralViaWorker(
       buffers
     );
   });
+}
+
+// One in-flight request per shared worker. Responses cannot satisfy another image's analysis.
+let spectralQueue: Promise<unknown> = Promise.resolve();
+function computeSpectralViaWorker(channels: Float64Array[], width: number, height: number): ReturnType<typeof runSpectralWorker> {
+  const pending = spectralQueue.then(() => runSpectralWorker(channels, width, height));
+  spectralQueue = pending.catch(() => undefined);
+  return pending;
 }
 
 // ===================== MAIN (ASYNC) =====================

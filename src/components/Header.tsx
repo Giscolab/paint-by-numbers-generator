@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { Palette, Download, FileArchive, FileText, ChevronDown } from "lucide-react";
+import { Layers, Download, FileArchive, ChevronDown, FolderOpen, Save, CheckCheck } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useStudio } from "@/contexts/StudioContext";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,6 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 
-// @ts-ignore
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
 
@@ -23,7 +22,7 @@ import { saveAs } from "file-saver";
  * - Menu ZIP (3 rendus)
  * - Theme toggle à droite
  */
-export const Header = () => {
+export const Header = ({ onImport }: { onImport?: () => void }) => {
   const studio = useStudio();
   const [isExporting, setIsExporting] = useState(false);
 
@@ -90,28 +89,17 @@ export const Header = () => {
   return (
     <header
       role="banner"
-      className="sticky top-0 z-50 h-16 bg-card/95 backdrop-blur border-b shadow-elev-1"
+      className="atelier-header"
     >
-      <div className="container h-full flex items-center gap-3">
-        {/* Zone gauche : icône + titre + baseline */}
-        <div className="min-w-0 flex items-center gap-2">
-          <Palette aria-hidden="true" className="h-6 w-6 text-foreground/60" />
-          <h1 className="truncate text-sm font-medium text-foreground/90">
-            Paint By Numbers Generator
-          </h1>
-          <span className="hidden sm:inline text-xs text-muted-foreground">
-            – Convertissez vos visuels en modèles prêts à peindre
-          </span>
-        </div>
-
-        {/* Zone centrale (onglets / placeholder) */}
-        <nav
-          aria-label="Modes"
-          className="mx-auto hidden md:flex items-center gap-1"
-        ></nav>
-
+      <div className="atelier-header-inner">
+        <div className="atelier-brand"><span className="atelier-brand-icon"><Layers size={20}/></span><h1>canvas<span> to </span>colors</h1><span className="atelier-brand-badge">STUDIO</span></div>
+        <nav aria-label="Menu principal" className="atelier-header-nav">
+          <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="sm">Fichier</Button></DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem onClick={onImport}><FolderOpen className="mr-2 h-4 w-4"/>Importer une image</DropdownMenuItem><DropdownMenuItem disabled={!studio.result} onClick={() => { try { studio.saveProject(studio.currentProject?.name || "Mon projet"); toast.success("Projet enregistré localement."); } catch (error) { toast.error(error instanceof Error ? error.message : "Impossible d’enregistrer ce projet."); } }}><Save className="mr-2 h-4 w-4"/>Enregistrer le projet localement</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+          <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="sm">Affichage</Button></DropdownMenuTrigger><DropdownMenuContent>{([['original','Original'],['colorized','Couleurs'],['contours','Contours'],['numbered','Numéros'],['compare','Comparer']] as const).map(([mode,label])=><DropdownMenuItem key={mode} disabled={mode !== 'original' && !studio.result} onClick={()=>studio.setViewMode(mode)}>{label}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>
+        </nav>
         {/* Zone droite : actions + theme toggle */}
         <div className="ml-auto flex items-center gap-2">
+          <span className="atelier-local-status"><CheckCheck size={13}/>Traitement local</span>
           {/* Export rapide PNG */}
           <Button
             size="sm"
@@ -126,7 +114,7 @@ export const Header = () => {
             ) : (
               <Download className="w-4 h-4" />
             )}
-            Export PNG
+            PNG
           </Button>
 
           {/* Menu ZIP */}
@@ -140,7 +128,7 @@ export const Header = () => {
                 title="Exporter les trois rendus (ZIP)"
               >
                 <FileArchive className="w-4 h-4" />
-                ZIP
+                Exporter
                 <ChevronDown className="w-3 h-3" />
               </Button>
             </DropdownMenuTrigger>

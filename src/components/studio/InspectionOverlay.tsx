@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { useStudio } from "@/contexts/StudioContext";
 import { Zone } from "@/lib/imageProcessing";
 import { Maximize2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -30,6 +31,7 @@ export function InspectionOverlay({
   width,
   height,
 }: InspectionOverlayProps) {
+  const { panTool } = useStudio();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const { clientToImage, dpr, wrapperRef, overlayRef } = useCanvasViewport();
 
@@ -162,6 +164,7 @@ export function InspectionOverlay({
   };
 
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (panTool) return;
     if (!labels) return;
     const pt = clientToImage(e.clientX, e.clientY);
     if (!pt) return;

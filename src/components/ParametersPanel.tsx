@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
   Wand2,
+  ChevronDown,
   Sparkles,
   Gauge,
   Layers,
@@ -53,6 +54,7 @@ interface ParametersPanelProps {
   recommendations: Recommendations | null;
   onProcess: () => void;
   isProcessing: boolean;
+  showProcessButton?: boolean;
 }
 
 /* --- helpers UI locaux, zéro dépendance --- */
@@ -88,10 +90,7 @@ function Section({
         </div>
         <div className="flex items-center gap-1.5">
           {badge}
-          <span
-            aria-hidden="true"
-            className="i-chevron transition-transform group-open:rotate-180 text-muted-foreground"
-          />
+          <ChevronDown aria-hidden="true" className="h-4 w-4 shrink-0 transition-transform group-open:rotate-180 text-muted-foreground" />
         </div>
       </summary>
       <div className="px-1.5 pb-1.5 pt-0.5">{children}</div>
@@ -100,6 +99,7 @@ function Section({
 }
 
 export const ParametersPanel = ({
+  showProcessButton = true,
   numColors,
   onNumColorsChange,
   minRegionSize,
@@ -191,7 +191,7 @@ export const ParametersPanel = ({
             )}
             <Slider
               id="colors"
-              min={0}
+              min={1}
               max={80}
               step={1}
               value={[numColors]}
@@ -200,7 +200,7 @@ export const ParametersPanel = ({
               className="w-full [&_.relative]:h-1 [&_[role=slider]]:h-3.5 [&_[role=slider]]:w-3.5 [&_[role=slider]]:border-2 [&_[role=slider]]:shadow-sm"
             />
             <div className="flex justify-between text-[9px] text-muted-foreground">
-              <span>0 (Non défini)</span>
+              <span>1 (Minimal)</span>
               <span>80 (Complexe)</span>
             </div>
           </div>
@@ -476,6 +476,7 @@ export const ParametersPanel = ({
       </Section>
 
       {/* CTA Générer (parité fonctionnelle) */}
+      {showProcessButton && <>
       <Button
         onClick={onProcess}
         disabled={isProcessing || !analysisReady}
@@ -501,6 +502,7 @@ export const ParametersPanel = ({
           Analyse nécessaire avant génération.
         </div>
       )}
+      </>}
     </Card>
   );
 };

@@ -1,20 +1,15 @@
 import {
-  buildZonesFromLabels,
   consolidateColorMap,
   createNumberedVersion,
-  createNumbersOverlay,
-  createPreviewFusion,
   detectEdges,
   generateLegend,
   generateSVG,
   hexToRgb,
   labelConnectedComponents,
-  mergeAdjacentPolygons,
   mergeNearIdenticalColors,
   mergeSimilarAdjacentZones,
   mergeSmallZones,
   quantizeColors,
-  refineZoneLabelPositions,
   smoothZones,
   traceContours
 } from './imageProcessing';
@@ -22,6 +17,7 @@ import { rgbToLab, deltaE2000, balancePalette, averagePaletteDeltaE } from './co
 import { artisticMerge, type ArtisticMergeStats } from './regionMerge';
 import type { RawImageAnalysis } from './analysisPipeline';
 import type { ProcessedResult } from './imageProcessing';
+import { paintRegionMap, placeRegionLabels, validateModelParameters } from './pbnModel';
 
 export interface RenderPipelineOptions {
   numColors: number;
@@ -61,8 +57,9 @@ export function renderPipeline(
     throw new Error('referenceGrayscaleMap incohérente avec referenceImageData.');
   }
 
-  const effectiveMinRegionSize = Math.max(minRegionSize, 20);
-  const effectiveMergeTolerance = Math.max(mergeTolerance, 1);
+  validateModelParameters(options);
+  const effectiveMinRegionSize = Math.max(0, Math.round(minRegionSize));
+  const effectiveMergeTolerance = Math.max(0, mergeTolerance);
   let artisticMergeStats: ArtisticMergeStats | undefined;
 
   // === STEP 1: Quantization ===
@@ -94,7 +91,6 @@ export function renderPipeline(
   const mappingStart = Date.now();
 
   const colorMap = new Uint16Array(width * height);
-  const quantizedData = new ImageData(width, height);
 
   const paletteLabCache = new Array(palette.length);
   for (let i = 0; i < palette.length; i++) {
@@ -102,31 +98,28 @@ export function renderPipeline(
     paletteLabCache[i] = rgbToLab(r, g, b);
   }
 
+  const nearestColors = new Map<number,number>();
   let pixelIndex = 0;
   for (let i = 0; i < referenceImageData.data.length; i += 4) {
     const r = referenceImageData.data[i];
     const g = referenceImageData.data[i + 1];
     const b = referenceImageData.data[i + 2];
 
-    const pixelLab = rgbToLab(r, g, b);
-    let minDist = Infinity;
-    let colorIndex = 0;
-
-    for (let idx = 0; idx < paletteLabCache.length; idx++) {
-      const dist = deltaE2000(pixelLab, paletteLabCache[idx]);
-      if (dist < minDist) {
-        minDist = dist;
-        colorIndex = idx;
+    const rgbKey = (r << 16) | (g << 8) | b;
+    let colorIndex = nearestColors.get(rgbKey);
+    if (colorIndex === undefined) {
+      const pixelLab = rgbToLab(r, g, b);
+      let minDist = Infinity;
+      colorIndex = 0;
+      for (let idx = 0; idx < paletteLabCache.length; idx++) {
+        const distance = deltaE2000(pixelLab, paletteLabCache[idx]);
+        if (distance < minDist) { minDist = distance; colorIndex = idx; }
       }
+      if (nearestColors.size < 65536) nearestColors.set(rgbKey, colorIndex);
     }
 
     colorMap[pixelIndex++] = colorIndex;
 
-    const [qr, qg, qb] = hexToRgb(palette[colorIndex]);
-    quantizedData.data[i] = qr;
-    quantizedData.data[i + 1] = qg;
-    quantizedData.data[i + 2] = qb;
-    quantizedData.data[i + 3] = 255;
   }
 
   report("Attribution terminée", 42, `Carte de couleurs générée en ${Date.now() - mappingStart}ms`);
@@ -154,28 +147,12 @@ export function renderPipeline(
     newColorMap[i] = consolidatedColorMap[i];
   }
 
-  const pixelCount = Math.min(consolidatedColorMap.length, width * height);
-  for (let i = 0; i < pixelCount; i++) {
-    const colorIndex = consolidatedColorMap[i];
-    if (
-      typeof colorIndex !== "number" ||
-      colorIndex < 0 ||
-      colorIndex >= consolidatedPalette.length
-    ) continue;
-
-    const [qr, qg, qb] = hexToRgb(consolidatedPalette[colorIndex]);
-    const base = i * 4;
-    quantizedData.data[base] = qr;
-    quantizedData.data[base + 1] = qg;
-    quantizedData.data[base + 2] = qb;
-    quantizedData.data[base + 3] = 255;
-  }
-
   // === STEP 3: Connected components ===
   report("Segmentation des zones", 48, "Étiquetage des composantes connexes");
   const segmentationStart = Date.now();
   const { labels: initialLabels, zones: initialZones } =
     labelConnectedComponents(Array.from(newColorMap), width, height);
+  if (initialZones.length > 100000) throw new Error("Image trop fragmentée. Réduisez le nombre de couleurs ou la résolution.");
   report(
     "Segmentation terminée",
     52,
@@ -253,66 +230,34 @@ export function renderPipeline(
     );
   }
 
-  // === STEP 5: Smooth zones ===
-  report("Lissage des bords", 64, `Itérations de lissage : ${Math.round(smoothness)}`);
-  const smoothStart = Date.now();
-  const smoothedLabels = smoothZones(
-    postMergeLabels,
-    width,
-    height,
-    Math.round(smoothness)
-  );
-  const smoothedZones = buildZonesFromLabels(
-    smoothedLabels,
-    palette,
-    width,
-    height,
-    postMergeZones
-  );
-  report(
-    "Lissage terminé",
-    68,
-    `${smoothedZones.length} zones prêtes en ${Date.now() - smoothStart}ms`
-  );
-
-  // === STEP 6: Edge detection ===
-  report("Génération des contours", 90, "Rasterisation des lignes de séparation");
+  // Lissage is a percentage, not up to 100 full-image passes.
+  const iterations = Math.round(smoothness / 20);
+  report("Lissage des bords", 64, `${iterations} passes`);
+  const smoothed = smoothZones(postMergeLabels, width, height, iterations);
+  const zoneColors = new Map(postMergeZones.map(zone => [zone.id, zone.colorIdx]));
+  const smoothedColors = Array.from(smoothed, id => zoneColors.get(id)!);
+  // Re-segment by color: smoothing can split a formerly connected region.
+  const connected = labelConnectedComponents(smoothedColors, width, height);
+  const cleaned = mergeSmallZones(connected.zones, connected.labels, palette, width, height, effectiveMinRegionSize);
+  const cleanedColors = new Map(cleaned.mergedZones.map(zone => [zone.id, zone.colorIdx]));
+  const finalComponents = labelConnectedComponents(Array.from(cleaned.mergedLabels, id => cleanedColors.get(id)!), width, height);
+  const smoothedLabels = finalComponents.labels;
+  const usedColors = new Set(finalComponents.zones.map(zone => zone.colorIdx));
+  const oldToNew = new Map<number, number>();
+  palette = palette.filter((_, index) => {
+    if (!usedColors.has(index)) return false;
+    oldToNew.set(index, oldToNew.size);
+    return true;
+  });
+  const smoothedZones = finalComponents.zones.map(zone => ({ ...zone, colorIdx: oldToNew.get(zone.colorIdx)! }));
+  report("Zones stabilisées", 68, `${smoothedZones.length} régions connexes`);
   const contoursData = detectEdges(smoothedLabels, referenceGrayscaleMap, width, height);
-
-  // === STEP 7: Contour tracing ===
-  report("Traçage des contours", 72, "Marching Squares en cours");
-  const contourStart = Date.now();
-  const contours = traceContours(width, height, smoothedZones);
-  report(
-    "Contours extraits",
-    76,
-    `${contours.length} chemins détectés en ${Date.now() - contourStart}ms`
-  );
-
-  // === STEP 8: Merge polygons of same color ===
-  report("Fusion topologique", 80, "Regroupement des polygones par couleur");
-  const topologyStart = Date.now();
-  const mergedContours = mergeAdjacentPolygons(contours, smoothedZones);
-  report(
-    "Topologie stabilisée",
-    83,
-    `${mergedContours.length} contours après fusion en ${Date.now() - topologyStart}ms`
-  );
-
-  // === STEP 9: Label placement refinement ===
-  report("Placement des numéros", 86, "Calcul des centres visuels");
-  const labelPlacementStart = Date.now();
-  const refinedZones = refineZoneLabelPositions(
-    smoothedZones,
-    mergedContours,
-    width,
-    height
-  );
-  report(
-    "Positions des étiquettes",
-    88,
-    `Zones optimisées en ${Date.now() - labelPlacementStart}ms`
-  );
+  report("Traçage des contours", 72, "Contours indépendants avec conservation des trous");
+  const mergedContours = traceContours(width, height, smoothedZones);
+  report("Contours extraits", 83, `${mergedContours.length} anneaux`);
+  const placements = placeRegionLabels(smoothedLabels, smoothedZones, width, height);
+  const refinedZones = smoothedZones.map(zone => ({...zone, label: placements.get(zone.id), centroid: placements.has(zone.id) ? {x:placements.get(zone.id)!.x, y:placements.get(zone.id)!.y} : zone.centroid}));
+  report("Placement des numéros", 88, `${placements.size} zones numérotables sur ${refinedZones.length}`);
 
   // === STEP 10: SVG generation ===
   report("Génération du SVG", 92, "Conversion des polygones en chemins");
@@ -328,17 +273,9 @@ export function renderPipeline(
     contoursData
   );
 
-  // === STEP 12: True preview fusion ===
-  report("Fusion de l'aperçu final", 96, "Superposition image + contours + numéros");
-  const numbersOverlay = createNumbersOverlay(refinedZones, smoothedLabels, width, height);
-  const previewData = createPreviewFusion(
-    referenceImageData,
-    contoursData,
-    numbersOverlay,
-    width,
-    height
-  );
-
+  // Colored output is the final segmentation, not the original photo or an overlay.
+  report("Rendu des aplats", 96, "Application de la palette aux régions finales");
+  const previewData = paintRegionMap(smoothedLabels, refinedZones, palette, width, height);
 
   // === STEP 13: Legend generation ===
   report("Génération de la légende", 98, `${palette.length} couleurs ordonnées par surface`);
@@ -355,6 +292,7 @@ export function renderPipeline(
 
   return {
     processed: {
+      original: referenceImageData,
       contours: contoursData,
       numbered: numberedData,
       colorized: previewData,

@@ -82,7 +82,7 @@ Designed for **creative studios**, **print shops**, and **artists**, it combines
 
 ## ✅ Prerequisites
 
-- **Node.js 18+**
+- **Node.js 22.12+** (ou 24+ ; voir `engines` dans `package.json`)
 - **npm** or yarn
 - **Modern browser** (Chrome, Edge, Firefox, Safari)
 - **(Optional)** Supabase project for authentication and profile features

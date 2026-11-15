@@ -1,7 +1,9 @@
+import animate from "tailwindcss-animate";
 import type { Config } from "tailwindcss";
+import { CRYPTOKEEP_THEMES } from "./src/config/themes";
 
 export default {
-  darkMode: ["class"],
+  darkMode: ["class", `:is(.dark, ${CRYPTOKEEP_THEMES.filter((theme) => theme.dark).map((theme) => `.theme-${theme.id}`).join(", ")})`],
   content: ["./pages/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./app/**/*.{ts,tsx}", "./src/**/*.{ts,tsx}"],
   prefix: "",
   theme: {
@@ -70,7 +72,7 @@ export default {
           "accent-red": "#FF3B30",
           "accent-yellow": "#FFCC00",
           "accent-green": "#34C759",
-          "accent-blue": "#007AFF",
+          "accent-blue": "hsl(var(--studio-accent-blue) / <alpha-value>)",
         },
       },
       borderRadius: {
@@ -102,5 +104,5 @@ export default {
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [animate],
 } satisfies Config;

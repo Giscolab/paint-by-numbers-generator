@@ -1,6 +1,7 @@
 import { analyzeBruteSignal, type BruteSignalReport } from './bruteSignalAnalyzer';
 import { createCanvasFactory } from './canvasFactory';
 import { generateGrayscaleMap } from './imageProcessing';
+import { flattenOnWhite } from './pbnModel';
 
 export interface RawImageAnalysis {
   readonly referenceImageData: ImageData;
@@ -39,7 +40,7 @@ async function loadImageSource(imageFile: File): Promise<LoadedImageSource> {
       reader.onload = null;
       reader.onerror = null;
       img.onload = null;
-      (img as any).onerror = null;
+      img.onerror = null;
     };
 
     reader.onload = e => {
@@ -60,7 +61,7 @@ async function loadImageSource(imageFile: File): Promise<LoadedImageSource> {
       });
     };
 
-    (img as any).onerror = () => {
+    img.onerror = () => {
       cleanup();
       reject(new Error("Impossible de charger l'image fournie."));
     };
@@ -107,10 +108,10 @@ export async function analysisPipeline(
 
     if (width > maxDim || height > maxDim) {
       if (width > height) {
-        height = Math.round((height * maxDim) / width);
+        height = Math.max(1, Math.round((height * maxDim) / width));
         width = maxDim;
       } else {
-        width = Math.round((width * maxDim) / height);
+        width = Math.max(1, Math.round((width * maxDim) / height));
         height = maxDim;
       }
       referenceImageData = resizeImageData(imageFile, width, height);
@@ -124,10 +125,10 @@ export async function analysisPipeline(
 
     if (width > maxDim || height > maxDim) {
       if (width > height) {
-        height = Math.round((height * maxDim) / width);
+        height = Math.max(1, Math.round((height * maxDim) / width));
         width = maxDim;
       } else {
-        width = Math.round((width * maxDim) / height);
+        width = Math.max(1, Math.round((width * maxDim) / height));
         height = maxDim;
       }
     }
@@ -140,6 +141,7 @@ export async function analysisPipeline(
 
   validateImageData(referenceImageData);
 
+  referenceImageData = flattenOnWhite(referenceImageData);
   const bruteSignal = await analyzeBruteSignal(referenceImageData);
   const referenceGrayscaleMap = generateGrayscaleMap(referenceImageData);
 

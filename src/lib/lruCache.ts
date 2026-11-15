@@ -26,7 +26,7 @@ export class LRUCache<T> {
     }
   }
 
-  private log(...args: any[]): void {
+  private log(...args: unknown[]): void {
     if (this.debug) {
       console.log('[LRU Cache]', ...args);
     }

@@ -34,7 +34,7 @@ export function ViewTabs({ originalImage, processedData }: ViewTabsProps) {
   };
 
   return (
-    <Tabs value={activeView} onValueChange={(v) => setActiveView(v as any)} className="h-full flex flex-col">
+    <Tabs value={activeView} onValueChange={(v) => setActiveView(v as typeof activeView)} className="h-full flex flex-col">
       <div className="px-6 pt-4 pb-2 border-b border-border/40">
         <TabsList className="grid w-full grid-cols-3 max-w-md">
           <TabsTrigger value="original" className="flex items-center gap-2">

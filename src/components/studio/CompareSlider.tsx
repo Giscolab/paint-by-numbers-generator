@@ -61,7 +61,7 @@ export function CompareSlider({
     if (!dragging) return;
     try {
       (e.currentTarget as HTMLElement).releasePointerCapture?.(pointerId as number);
-    } catch {}
+    } catch { /* Capture may already be released by the browser. */ }
     setDragging(false);
     setPointerId(null);
   }, [dragging, pointerId]);

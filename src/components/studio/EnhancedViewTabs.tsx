@@ -23,7 +23,7 @@ interface EnhancedViewTabsProps {
 
 export function EnhancedViewTabs({ originalImage, processedData }: EnhancedViewTabsProps) {
   const studio = useStudio();
-  const canvasCache = useRef<Map<string, string>>(new Map());
+  const canvasCache = useRef<WeakMap<ImageData, string>>(new WeakMap());
   const [imageInfo, setImageInfo] = useState<{width: number;height: number;size: string;} | null>(null);
   // 1. Ajout de la référence de dimensions
   const [referenceDimensions, setReferenceDimensions] = useState<{width: number;height: number;} | null>(null);
@@ -76,8 +76,8 @@ export function EnhancedViewTabs({ originalImage, processedData }: EnhancedViewT
   const getCanvasDataUrl = useMemo(() => {
     return (imageData: ImageData | null, key: string): string | null => {
       if (!imageData) return null;
-      if (canvasCache.current.has(key)) {
-        return canvasCache.current.get(key)!;
+      if (canvasCache.current.has(imageData)) {
+        return canvasCache.current.get(imageData)!;
       }
       const canvas = document.createElement("canvas");
       canvas.width = imageData.width;
@@ -86,7 +86,7 @@ export function EnhancedViewTabs({ originalImage, processedData }: EnhancedViewT
       if (ctx) {
         ctx.putImageData(imageData, 0, 0);
         const dataUrl = canvas.toDataURL();
-        canvasCache.current.set(key, dataUrl);
+        canvasCache.current.set(imageData, dataUrl);
         return dataUrl;
       }
       return null;
@@ -97,17 +97,6 @@ export function EnhancedViewTabs({ originalImage, processedData }: EnhancedViewT
   useEffect(() => {
     setProfilerEnabled(studio.settings.profilingEnabled);
   }, [studio.settings.profilingEnabled, setProfilerEnabled]);
-
-  // Clear cache when inputs/effects change
-  useEffect(() => {
-    canvasCache.current.clear();
-  }, [
-  processedData,
-  studio.settings.paintEffect,
-  studio.settings.paintIntensity,
-  studio.settings.artisticEffect,
-  studio.settings.artisticIntensity]
-  );
 
   const contoursUrl = useMemo(
     () => getCanvasDataUrl(processedData?.contours || null, "contours"),
@@ -160,10 +149,9 @@ export function EnhancedViewTabs({ originalImage, processedData }: EnhancedViewT
   }, [processedData?.colorized]);
 
   useEffect(() => {
-    if (referenceDimensions) {
-      viewportRef.current?.fitToScreen();
-    }
-  }, [referenceDimensions?.height, referenceDimensions?.width]);
+    const frame = requestAnimationFrame(() => viewportRef.current?.fitToScreen());
+    return () => cancelAnimationFrame(frame);
+  }, [originalImage, imageInfo?.width, imageInfo?.height, referenceDimensions?.width, referenceDimensions?.height]);
 
   const handleToggleProfiler = useCallback(
     (enabled: boolean) => {
@@ -260,7 +248,7 @@ export function EnhancedViewTabs({ originalImage, processedData }: EnhancedViewT
     <TooltipProvider>
       <Tabs
         value={studio.viewMode}
-        onValueChange={(v) => studio.setViewMode(v as any)}
+        onValueChange={(v) => studio.setViewMode(v as typeof studio.viewMode)}
         className="h-full flex flex-col">
 
         {/* --- Barre d'onglets --- 
@@ -367,7 +355,7 @@ export function EnhancedViewTabs({ originalImage, processedData }: EnhancedViewT
                 </div>
               </div> :
 
-            <div className="h-full border-dotted border-primary border-2 flex-row py-0 flex items-center justify-center gap-0 bg-sidebar-border text-[studio-canvas-header] text-primary px-[150px] mx-0 my-0">
+            <div className="h-full border-dotted border-border border-2 flex-row py-0 flex items-center justify-center gap-0 bg-studio-canvas text-muted-foreground px-[150px] mx-0 my-0">
                 <div className="text-center">
                   <ImageIcon className="w-12 h-12 mx-auto mb-4 opacity-30" />
                   <p className="text-sm text-studio-foreground/70">Chargez une image pour commencer</p>
@@ -683,7 +671,7 @@ export function EnhancedViewTabs({ originalImage, processedData }: EnhancedViewT
 
                     <div className="relative h-full w-full overflow-hidden rounded-lg shadow-studio-image">
                       <InspectionOverlay
-                      imageData={processedData.numbered}
+                      imageData={studio.overlay.numbered ? processedData.numbered : processedData.contours}
                       zones={processedData.zones}
                       palette={processedData.palette}
                       labels={processedData.labels}

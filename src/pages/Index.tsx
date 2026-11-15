@@ -42,6 +42,10 @@ function IndexContent() {
   useAutoSave();
 
   const lastFileRef = useRef<File | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const documentRevision = useRef(0);
+  const processingLock = useRef(false);
+  const [isImporting, setIsImporting] = useState(false);
   const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null);
   const [showConfetti, setShowConfetti] = useState(false);
   const [processingStage, setProcessingStage] = useState("");
@@ -67,10 +71,15 @@ function IndexContent() {
       setImageDimensions({ width: image.naturalWidth, height: image.naturalHeight });
     };
     image.src = selectedImageUrl;
+    return () => { image.onload = null; };
   }, [selectedImageUrl]);
 
   // ========== IMAGE SELECTION ==========
   const handleImageSelect = async (file: File) => {
+    if (processingLock.current) { toast.info("Patientez jusqu’à la fin de la génération avant de changer d’image."); return; }
+    if (file.size > IMAGE_PROCESSING.MAX_FILE_SIZE_BYTES || !file.type.startsWith('image/')) { toast.error("Choisissez une image de 20 Mo maximum."); return; }
+    const revision = ++documentRevision.current;
+    setIsImporting(true);
     try {
       const originalName = file.name;
       const isVectorSource = isSvgFile(file);
@@ -97,6 +106,7 @@ function IndexContent() {
         processingFile = rasterized.file;
       }
 
+      if (revision !== documentRevision.current) return;
       lastFileRef.current = processingFile;
       const tempUrl = URL.createObjectURL(processingFile);
       setSelectedImageUrl(tempUrl);
@@ -111,6 +121,7 @@ function IndexContent() {
         settings: { ...studio.settings, ...resetSettings },
       };
 
+      studio.setViewMode("original");
       studio.setResult(null);
       studio.setAnalysis(null);
       studio.setRecommendations(null);
@@ -128,6 +139,7 @@ function IndexContent() {
         processingFile,
         IMAGE_PROCESSING.MAX_DISPLAY_WIDTH
       );
+      if (revision !== documentRevision.current) { URL.revokeObjectURL(tempUrl); return; }
       setSelectedImageUrl(normalizedUrl);
       studio.setCurrentProject({ ...initialProject, imageUrl: normalizedUrl });
       URL.revokeObjectURL(tempUrl);
@@ -135,11 +147,13 @@ function IndexContent() {
       console.error(err);
       toast.error("Erreur lors du chargement de l'image");
     } finally {
-      setIsAnalyzing(false);
+      if (revision === documentRevision.current) { setIsAnalyzing(false); setIsImporting(false); }
     }
   };
 
   const handleAnalyze = async () => {
+    if (isImporting || processingLock.current || isAnalyzing) return;
+    const revision = documentRevision.current;
     const file = studio.currentProject?.imageFile ?? lastFileRef.current;
     if (!file) {
       toast.error("Aucun fichier à analyser");
@@ -152,6 +166,7 @@ function IndexContent() {
         onProgress: () => {},
         sourceType: studio.currentProject?.sourceType ?? "raster",
       });
+      if (revision !== documentRevision.current) return;
       const recommendations = getRecommendationsFromAnalysis(analysis);
       studio.setAnalysis(analysis);
       studio.setRecommendations(recommendations);
@@ -173,6 +188,7 @@ function IndexContent() {
 
   // ========== PROCESSING ==========
   const handleProcess = async () => {
+    if (processingLock.current || isImporting || isAnalyzing) return;
     const file = studio.currentProject?.imageFile ?? lastFileRef.current;
     if (!file) return toast.error("Aucun fichier à traiter");
     if (!studio.analysis) {
@@ -180,6 +196,7 @@ function IndexContent() {
       return;
     }
 
+    processingLock.current = true;
     studio.setIsProcessing(true);
     setProcessingStage("Initialisation…");
     toast.info("Traitement de l'image en cours ⚡");
@@ -216,15 +233,19 @@ function IndexContent() {
       );
 
       studio.setResult(result);
+      studio.setViewMode("colorized");
       setShowConfetti(true);
       setTimeout(() => setShowConfetti(false), UI.CONFETTI_DURATION_MS);
-      toast.success("🎉 Modèle généré avec succès !");
+      const missing = result.metadata?.unnumberedZoneCount ?? 0;
+      if (missing) toast.warning(`${missing} zone(s) trop fines pour un numéro. Vérifiez le modèle avant impression.`);
+      else toast.success("Modèle généré : chaque zone dispose d’un numéro lisible.");
     } catch (err) {
       console.error("Erreur de traitement :", err);
       toast.error("Erreur lors du traitement de l'image");
       if (profilingActive) clearHistory();
     } finally {
       if (profilingActive) endProfiling();
+      processingLock.current = false;
       studio.setIsProcessing(false);
       setProcessingProgress(0);
     }
@@ -232,8 +253,9 @@ function IndexContent() {
 
   // ========== RENDER ==========
   return (
-    <div className="min-h-screen flex flex-col">
-      <Header />
+    <div className="atelier-studio">
+      <input ref={importInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleImageSelect(file); event.target.value = ""; }} />
+      <Header onImport={() => importInputRef.current?.click()} />
 
       {/* Confettis */}
       {showConfetti && (
@@ -255,6 +277,9 @@ function IndexContent() {
 
       {/* === Layout principal === */}
       <StudioLayout
+        sourceImage={selectedImageUrl}
+        onImport={() => importInputRef.current?.click()}
+        configurationAction={<><p className="mb-3 text-[10px] text-muted-foreground">{studio.analysis ? "Votre prochaine création commence ici." : "Analysez votre image pour commencer."}</p><Button className="h-10 w-full gap-2 text-xs" onClick={handleProcess} disabled={studio.isProcessing || isImporting || isAnalyzing || !studio.analysis}>{studio.isProcessing ? "Création en cours…" : "Générer ma création"}</Button></>}
         leftPanel={
           <>
             <ImageUpload
@@ -267,7 +292,7 @@ function IndexContent() {
                 type="button"
                 size="sm"
                 onClick={handleAnalyze}
-                disabled={!selectedImageUrl || isAnalyzing}
+                disabled={!selectedImageUrl || isAnalyzing || isImporting || studio.isProcessing}
               >
                 {isAnalyzing ? "Analyse en cours…" : "Analyser l'image"}
               </Button>
@@ -311,7 +336,9 @@ function IndexContent() {
               }}
             />
 
+            <fieldset disabled={studio.isProcessing || isImporting} className="atelier-parameters-fieldset">
             <ParametersPanel
+              showProcessButton={false}
 
               numColors={studio.settings.numColors}
               onNumColorsChange={(v) =>
@@ -375,6 +402,7 @@ function IndexContent() {
               onProcess={handleProcess}
               isProcessing={studio.isProcessing}
             />
+            </fieldset>
           </>
         }
         centerPanel={
@@ -395,7 +423,7 @@ function IndexContent() {
                     onColorSelect={setSelectedColorIdx}
                   />
                 )}
-                <DebugPanel processedData={studio.result} />
+                <details className="atelier-debug"><summary>Analyse détaillée du modèle</summary><DebugPanel processedData={studio.result} /></details>
               </>
             )}
           </>

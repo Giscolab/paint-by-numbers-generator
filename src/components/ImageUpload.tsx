@@ -149,9 +149,9 @@ export const ImageUpload = ({ onImageSelect, selectedImage }: ImageUploadProps) 
       validateAndAccept(file);
       setUrlInput("");
       toast({ title: "Image importée depuis l'URL" });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("URL import error:", err);
-      toast({ title: "Échec de l'import", description: err.message || "Impossible de télécharger l'image.", variant: "destructive" });
+      toast({ title: "Échec de l'import", description: err instanceof Error ? err.message : "Impossible de télécharger l'image.", variant: "destructive" });
     } finally {
       setIsLoadingUrl(false);
     }

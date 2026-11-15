@@ -24,7 +24,6 @@ import {
 import { useStudio } from "@/contexts/StudioContext";
 import { exportToPdf, PdfExportOptions, DEFAULT_PDF_OPTIONS } from "@/lib/exportPdf";
 
-// @ts-ignore
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
 
@@ -323,7 +322,7 @@ export function ExportBar() {
           <div className="space-y-3">
             <div>
               <Label>Format papier</Label>
-              <Select value={pdfOptions.paperSize} onValueChange={(v) => setPdfOptions((o) => ({ ...o, paperSize: v as any }))}>
+              <Select value={pdfOptions.paperSize} onValueChange={(v) => setPdfOptions((o) => ({ ...o, paperSize: v as PdfExportOptions["paperSize"] }))}>
                 <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="a4">A4 (210 × 297 mm)</SelectItem>
@@ -334,7 +333,7 @@ export function ExportBar() {
             </div>
             <div>
               <Label>Orientation</Label>
-              <Select value={pdfOptions.orientation} onValueChange={(v) => setPdfOptions((o) => ({ ...o, orientation: v as any }))}>
+              <Select value={pdfOptions.orientation} onValueChange={(v) => setPdfOptions((o) => ({ ...o, orientation: v as PdfExportOptions["orientation"] }))}>
                 <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="portrait">Portrait</SelectItem>

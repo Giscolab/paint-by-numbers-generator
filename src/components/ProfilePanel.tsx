@@ -33,7 +33,7 @@ export function ProfilePanel() {
   }
 
   const handleSave = () => {
-    const updates: any = {};
+    const updates: {username?: string; avatar_url?: string} = {};
     if (username !== profile.username) updates.username = username;
     if (avatarUrl !== profile.avatar_url) updates.avatar_url = avatarUrl;
     

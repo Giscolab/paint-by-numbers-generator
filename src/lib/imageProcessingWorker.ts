@@ -3,6 +3,7 @@
  */
 
 import { ProcessedResult } from './imageProcessing';
+import { validateModelParameters } from './pbnModel';
 import { IMAGE_PROCESSING } from '@/config/constants';
 
 const WORKER_BASE_TIMEOUT = IMAGE_PROCESSING.WORKER_TIMEOUT_MS;
@@ -49,6 +50,8 @@ export class ImageProcessingWorker {
     onProgress?: (stage: string, progress: number) => void,
     enableSmartPalette: boolean = false
   ): Promise<ProcessedResult> {
+    if (this.isActive) throw new Error('Un traitement est déjà en cours.');
+    validateModelParameters({numColors,minRegionSize,smoothness,mergeTolerance,enableArtisticMerge,enableSmartPalette});
     // Validate image file first
     validateImageFile(imageFile);
 
@@ -70,7 +73,9 @@ export class ImageProcessingWorker {
     }
 
     return new Promise((resolve, reject) => {
+      if (this.isActive) { reject(new Error("Un traitement est déjà en cours.")); return; }
       this.isActive = true;
+      this.lastResult = null;
       let timeoutId: ReturnType<typeof setTimeout> | null = null;
       let resultReceived = false;
 

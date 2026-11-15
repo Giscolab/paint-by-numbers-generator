@@ -25,8 +25,6 @@ function readableTextOn(bgHex: string): "white" | "black" {
 export const ColorPalette = ({ colors }: ColorPaletteProps) => {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
-  if (colors.length === 0) return null;
-
   const handleCopyColor = useCallback(async (color: string, index: number) => {
     try {
       await navigator.clipboard.writeText(color);
@@ -50,6 +48,8 @@ export const ColorPalette = ({ colors }: ColorPaletteProps) => {
     },
     [handleCopyColor]
   );
+
+  if (colors.length === 0) return null;
 
   return (
     <Card className="p-4 md:p-6 bg-card/60 backdrop-blur-sm border">

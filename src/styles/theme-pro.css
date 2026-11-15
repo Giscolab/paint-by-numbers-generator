@@ -1,9 +1,5 @@
 /* src/styles/theme-pro.css */
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
 /**
  * ===========================
  * THEME PRO – Design System d'Entreprise (v3.0 - Final Grade)
@@ -111,7 +107,7 @@
   --scrollbar-thumb-hover: hsl(240 6% 72%);
 }
 
-.theme-pro.dark {
+.dark .theme-pro {
   /* --- 1.3. Couleurs (Palette de base) --- */
   --background: 240 10% 7%;
   --foreground: 240 20% 98%;
@@ -340,33 +336,33 @@
    =========================== */
 .theme-pro {
   /* Couleurs spécifiques au thème studio */
-  --studio-workspace: hsl(var(--background));
-  --studio-panel: hsl(var(--card) / 0.85);
-  --studio-panel-header: hsl(var(--muted) / 0.5);
-  --studio-canvas: hsl(var(--background));
-  --studio-canvas-header: hsl(var(--muted) / 0.3);
-  --studio-status-bar: hsl(var(--card) / 0.9);
-  --studio-border: hsl(var(--border));
-  --studio-hover: hsl(var(--accent) / 0.5);
-  --studio-foreground: hsl(var(--foreground));
+  --studio-workspace: var(--background);
+  --studio-panel: var(--card);
+  --studio-panel-header: var(--muted);
+  --studio-canvas: var(--background);
+  --studio-canvas-header: var(--muted);
+  --studio-status-bar: var(--card);
+  --studio-border: var(--border);
+  --studio-hover: var(--accent);
+  --studio-foreground: var(--foreground);
   
   /* Couleurs d'accent style Adobe */
   --studio-accent-red: #FF3B30;
   --studio-accent-yellow: #FFCC00;
   --studio-accent-green: #34C759;
-  --studio-accent-blue: #007AFF;
+  --studio-accent-blue: var(--primary);
 }
 
-.theme-pro.dark {
-  --studio-workspace: hsl(var(--background));
-  --studio-panel: hsl(var(--card) / 0.75);
-  --studio-panel-header: hsl(var(--muted) / 0.3);
-  --studio-canvas: hsl(var(--background));
-  --studio-canvas-header: hsl(var(--muted) / 0.2);
-  --studio-status-bar: hsl(var(--card) / 0.8);
-  --studio-border: hsl(var(--border));
-  --studio-hover: hsl(var(--accent) / 0.3);
-  --studio-foreground: hsl(var(--foreground));
+.dark .theme-pro {
+  --studio-workspace: var(--background);
+  --studio-panel: var(--card);
+  --studio-panel-header: var(--muted);
+  --studio-canvas: var(--background);
+  --studio-canvas-header: var(--muted);
+  --studio-status-bar: var(--card);
+  --studio-border: var(--border);
+  --studio-hover: var(--accent);
+  --studio-foreground: var(--foreground);
 }
 
 /* Patterns et textures */
@@ -443,7 +439,7 @@
     0 0 0 1px hsl(var(--border) / 0.2);
 }
 
-.theme-pro.dark .shadow-studio-image {
+.dark .theme-pro .shadow-studio-image {
   box-shadow: 
     0 4px 20px hsl(0 0% 0% / 0.3),
     0 0 0 1px hsl(var(--border) / 0.2);
@@ -524,7 +520,7 @@
     0 0 0 1px hsl(var(--studio-border) / 0.3);
 }
 
-.theme-pro.dark .studio-project-card:hover {
+.dark .theme-pro .studio-project-card:hover {
   box-shadow: 
     0 8px 16px hsl(0 0% 0% / 0.25),
     0 0 0 1px hsl(var(--studio-border) / 0.3);

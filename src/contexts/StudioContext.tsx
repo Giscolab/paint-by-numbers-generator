@@ -26,7 +26,8 @@ export type ViewMode =
   | "contours"
   | "numbered"
   | "colorized"
-  | "compare";
+  | "compare"
+  | "profiler";
 
 export interface StudioSettings {
   numColors: number;
@@ -194,7 +195,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [preferences, setPreferences] =
     useState<UserPreferences>(loadPreferences);
-  const [viewMode, setViewMode] = useState<ViewMode>(preferences.lastViewMode);
+  const [viewMode, setViewMode] = useState<ViewMode>("original");
   const [analysis, setAnalysis] = useState<ColorAnalysis | null>(null);
   const [recommendations, setRecommendations] = useState<Recommendations | null>(null);
   const [result, setResult] = useState<ProcessedResult | null>(null);
@@ -234,7 +235,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     (n: number) => {
       const labels = result?.labels;
       if (!labels) return;
-      const target = labels.find((l: any) => l?.number === n);
+      const target = result?.zones.find(zone => zone.colorIdx + 1 === n);
       if (target) {
         console.info("[Studio] Zone trouvée:", target);
       }
@@ -269,6 +270,7 @@ const renderToCanvas = useCallback((
     return null;
   }
 
+  if (!Number.isFinite(scale) || scale <= 0 || scale > 8) throw new Error("Échelle d’export invalide.");
   const canvas = document.createElement("canvas");
   canvas.width = width * scale;
   canvas.height = height * scale;
@@ -283,6 +285,8 @@ const renderToCanvas = useCallback((
   let img: ImageData | null = null;
   switch (mode) {
     case "original":
+      img = result.original ?? null;
+      break;
     case "colorized":
       img = colorized;
       break;
@@ -320,25 +324,7 @@ const renderToCanvas = useCallback((
   ctx.drawImage(tempCanvas, 0, 0, img.width, img.height, 0, 0, width, height);
   ctx.restore();
 
-  // ✅ Numéros en surimpression (si applicable)
-  if (mode === "numbered" && Array.isArray(result.zones)) {
-    const scaleRatioX = width / img.width;
-    const scaleRatioY = height / img.height;
-    ctx.font = `bold ${10 * scale}px JetBrains Mono`;
-    ctx.fillStyle = "black";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-
-    for (const zone of result.zones) {
-      if (zone.centroid && zone.id != null) {
-        ctx.fillText(
-          zone.id.toString(),
-          Math.round(zone.centroid.x * scaleRatioX * scale) + 0.5,
-          Math.round(zone.centroid.y * scaleRatioY * scale) + 0.5
-        );
-      }
-    }
-  }
+  // The numbered image already contains palette numbers. Never draw zone ids over it.
 
   // ✅ Filigrane optionnel
   if (settings.watermarkEnabled && settings.watermarkText) {
@@ -426,6 +412,10 @@ const renderToCanvas = useCallback((
   useEffect(() => {
     profiler.setEnabled(settings.profilingEnabled);
   }, [settings.profilingEnabled, profiler.setEnabled]);
+
+  useEffect(() => {
+    if (!result && viewMode !== "original" && viewMode !== "profiler") setViewMode("original");
+  }, [result, viewMode]);
 
   useEffect(() => {
     savePreferences(preferences);

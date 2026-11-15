@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -49,13 +49,11 @@ export function DebugPanel({ processedData }: DebugPanelProps) {
   const { zones, palette, metadata, progressLog, artisticMergeStats } = processedData;
 
   // Métriques défensives : supporte metadata sans profilage détaillé
-  const stageDurations = (metadata as any)?.stageDurationsMs as number[] | undefined;
-  const memoryMB =
-    (metadata as any)?.memoryUsageMB ??
-    ((metadata as any)?.memoryUsageBytes ? Math.round(((metadata as any).memoryUsageBytes / (1024 * 1024)) * 10) / 10 : undefined);
-
-  const p50 = useMemo(() => percentile(stageDurations ?? [], 50), [stageDurations]);
-  const p95 = useMemo(() => percentile(stageDurations ?? [], 95), [stageDurations]);
+  const details = metadata as typeof metadata & { stageDurationsMs?: number[]; memoryUsageMB?: number; memoryUsageBytes?: number };
+  const stageDurations = details?.stageDurationsMs;
+  const memoryMB = details?.memoryUsageMB ?? (details?.memoryUsageBytes ? Math.round(details.memoryUsageBytes / (1024*1024)*10)/10 : undefined);
+  const p50 = percentile(stageDurations ?? [], 50);
+  const p95 = percentile(stageDurations ?? [], 95);
 
   return (
     <Card className="bg-card/60 backdrop-blur-sm border">

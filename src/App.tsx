@@ -8,7 +8,7 @@ import NotFound from "./pages/NotFound";
 const App = () => (
   <ThemeProvider>
     <div className="theme-pro min-h-dvh flex flex-col">
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter>
         <Toaster />
         <Sonner />
         <Routes>
