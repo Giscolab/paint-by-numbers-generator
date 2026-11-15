@@ -70,7 +70,7 @@ Designed for **creative studios**, **print shops**, and **artists**, it combines
 - **jszip + file-saver** – Export generation
 
 ### Backend Integration
-- **Supabase** – Authentication, profiles, storage
+- **Supabase** – Optional image URL proxy and AI parameter suggestions
 - **SQL Migrations** – Database schema management (`supabase/migrations/`)
 
 ### Performance
@@ -83,9 +83,9 @@ Designed for **creative studios**, **print shops**, and **artists**, it combines
 ## ✅ Prerequisites
 
 - **Node.js 22.12+** (ou 24+ ; voir `engines` dans `package.json`)
-- **npm** or yarn
+- **npm** (the project uses `package-lock.json`)
 - **Modern browser** (Chrome, Edge, Firefox, Safari)
-- **(Optional)** Supabase project for authentication and profile features
+- **(Optional)** Supabase project for the image URL proxy and remote AI suggestions
 
 ---
 
@@ -198,15 +198,6 @@ Database schema and policies are managed via migrations in `supabase/migrations/
   <Route path="/" element={<Index />} />
   <Route path="*" element={<NotFound />} />
 </Routes>
-```
-
-### Authentication (Optional)
-
-If Supabase is configured, use the auth hooks:
-
-```typescript
-// src/hooks/useAuth.ts
-const { signIn, signUp, signOut, user } = useAuth();
 ```
 
 ---

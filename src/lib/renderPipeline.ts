@@ -1,16 +1,13 @@
 import {
-  consolidateColorMap,
   createNumberedVersion,
   detectEdges,
   generateLegend,
   generateSVG,
   hexToRgb,
-  labelConnectedComponents,
   mergeNearIdenticalColors,
   mergeSimilarAdjacentZones,
   mergeSmallZones,
   quantizeColors,
-  smoothZones,
   traceContours
 } from './imageProcessing';
 import { rgbToLab, deltaE2000, balancePalette, averagePaletteDeltaE } from './colorUtils';
@@ -18,6 +15,7 @@ import { artisticMerge, type ArtisticMergeStats } from './regionMerge';
 import type { RawImageAnalysis } from './analysisPipeline';
 import type { ProcessedResult } from './imageProcessing';
 import { paintRegionMap, placeRegionLabels, validateModelParameters } from './pbnModel';
+import { consolidateColorMapTyped as consolidateColorMap, labelConnectedComponentsFast as labelConnectedComponents, smoothZonesFast as smoothZones } from './fastImageOperations';
 
 export interface RenderPipelineOptions {
   numColors: number;
@@ -142,7 +140,10 @@ export function renderPipeline(
     paletteLabCache[i] = rgbToLab(r, g, b);
   }
 
-  const nearestColors = new Map<number,number>();
+  // 24-bit direct color lookup: 16 MiB to cache all possible RGB inputs.
+  // Zero is the "not calculated" sentinel; palette indices are stored +1.
+  // This avoids repeated ΔE2000 calculations after the old 65,536-color cap.
+  const nearestColors = new Uint8Array(1 << 24);
   let pixelIndex = 0;
   for (let i = 0; i < referenceImageData.data.length; i += 4) {
     const r = referenceImageData.data[i];
@@ -150,8 +151,8 @@ export function renderPipeline(
     const b = referenceImageData.data[i + 2];
 
     const rgbKey = (r << 16) | (g << 8) | b;
-    let colorIndex = nearestColors.get(rgbKey);
-    if (colorIndex === undefined) {
+    let colorIndex = nearestColors[rgbKey] - 1;
+    if (colorIndex < 0) {
       const pixelLab = rgbToLab(r, g, b);
       let minDist = Infinity;
       colorIndex = 0;
@@ -159,11 +160,10 @@ export function renderPipeline(
         const distance = deltaE2000(pixelLab, paletteLabCache[idx]);
         if (distance < minDist) { minDist = distance; colorIndex = idx; }
       }
-      if (nearestColors.size < 65536) nearestColors.set(rgbKey, colorIndex);
+      nearestColors[rgbKey] = colorIndex + 1;
     }
 
     colorMap[pixelIndex++] = colorIndex;
-
   }
 
   report("Attribution terminée", 42, `Carte de couleurs générée en ${Date.now() - mappingStart}ms`);
@@ -174,7 +174,7 @@ export function renderPipeline(
 
   const { consolidatedPalette, consolidatedColorMap } = consolidateColorMap(
     palette,
-    Array.from(colorMap),
+    colorMap,
     paletteLabCache,
     effectiveMergeTolerance
   );
@@ -186,21 +186,18 @@ export function renderPipeline(
   );
 
   palette = consolidatedPalette;
-  const newColorMap = new Uint16Array(consolidatedColorMap.length);
-  for (let i = 0; i < consolidatedColorMap.length; i++) {
-    newColorMap[i] = consolidatedColorMap[i];
-  }
+  const newColorMap = consolidatedColorMap;
 
   // === STEP 3: Connected components ===
   report("Segmentation des zones", 48, "Étiquetage des composantes connexes");
   const segmentationStart = Date.now();
   let segmentationMap: Uint16Array<ArrayBufferLike> = newColorMap;
-  let initialComponents = labelConnectedComponents(Array.from(segmentationMap), width, height);
+  let initialComponents = labelConnectedComponents(segmentationMap, width, height);
   const MAX_INITIAL_ZONES = 100000;
   for (let pass = 1; initialComponents.zones.length > MAX_INITIAL_ZONES && pass <= 3; pass++) {
     report("Simplification des micro-zones", 49 + pass, `${initialComponents.zones.length} régions — passe ${pass}/3`);
     segmentationMap = suppressColorSpeckles(segmentationMap, width, height);
-    initialComponents = labelConnectedComponents(Array.from(segmentationMap), width, height);
+    initialComponents = labelConnectedComponents(segmentationMap, width, height);
   }
   if (initialComponents.zones.length > MAX_INITIAL_ZONES) {
     throw new Error(
@@ -291,12 +288,12 @@ export function renderPipeline(
   report("Lissage des bords", 64, `${iterations} passes`);
   const smoothed = smoothZones(postMergeLabels, width, height, iterations);
   const zoneColors = new Map(postMergeZones.map(zone => [zone.id, zone.colorIdx]));
-  const smoothedColors = Array.from(smoothed, id => zoneColors.get(id)!);
+  const smoothedColors = Uint16Array.from(smoothed, id => zoneColors.get(id)!);
   // Re-segment by color: smoothing can split a formerly connected region.
   const connected = labelConnectedComponents(smoothedColors, width, height);
   const cleaned = mergeSmallZones(connected.zones, connected.labels, palette, width, height, effectiveMinRegionSize);
   const cleanedColors = new Map(cleaned.mergedZones.map(zone => [zone.id, zone.colorIdx]));
-  const finalComponents = labelConnectedComponents(Array.from(cleaned.mergedLabels, id => cleanedColors.get(id)!), width, height);
+  const finalComponents = labelConnectedComponents(Uint16Array.from(cleaned.mergedLabels, id => cleanedColors.get(id)!), width, height);
   const smoothedLabels = finalComponents.labels;
   const usedColors = new Set(finalComponents.zones.map(zone => zone.colorIdx));
   const oldToNew = new Map<number, number>();
