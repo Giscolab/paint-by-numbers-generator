@@ -13,4 +13,4 @@ Allow: /
 User-agent: *
 Allow: /
 
-Sitemap: https://paint-by-numbers-generator.lovable.app/sitemap.xml
+Sitemap: https://giscolab.github.io/paint-by-numbers-generator/sitemap.xml

@@ -8,7 +8,7 @@ import NotFound from "./pages/NotFound";
 const App = () => (
   <ThemeProvider>
     <div className="theme-pro min-h-dvh flex flex-col">
-      <BrowserRouter>
+      <BrowserRouter basename={import.meta.env.BASE_URL}>
         <Toaster />
         <Sonner />
         <Routes>

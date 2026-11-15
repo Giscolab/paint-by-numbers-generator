@@ -12,6 +12,7 @@ npm run test:coverage
 npm run test:types
 npx playwright install chromium
 npm run test:e2e
+npm run test:pages
 ```
 
 `npm run check` enchaîne les types de l’application et des tests, ESLint, la couverture et la compilation. Les tests navigateur se lancent séparément avec `npm run test:e2e` ; `npm run test:e2e:ui` ouvre leur interface de diagnostic.

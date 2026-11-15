@@ -2,6 +2,8 @@
 
 ### De la photo au modèle de peinture par numéros.
 
+**[Ouvrir le studio en ligne](https://giscolab.github.io/paint-by-numbers-generator/)**
+
 **Canvas to Colors — PaintByNumbers Studio** transforme vos images en une palette de peinture, des contours et un dessin numéroté. Importez une photo, analysez ses couleurs, ajustez le niveau de détail et préparez vos rendus à télécharger ou à imprimer, dans un même atelier visuel.
 
 ![Le studio Canvas to Colors avec un paysage de montagne et le thème Padawan](docs/studio-preview.jpg)
@@ -111,6 +113,7 @@ Le projet utilise **React, TypeScript et Vite**, avec Tailwind CSS et Radix UI p
 | `npm test` | Exécuter les tests automatisés. |
 | `npm run test:coverage` | Exécuter les tests unitaires et produire le rapport de couverture. |
 | `npm run test:e2e` | Vérifier les parcours Chromium sur la compilation de production. |
+| `npm run test:pages` | Vérifier ces mêmes parcours sous le chemin du dépôt GitHub Pages. |
 | `npm run test:types` | Vérifier aussi les types des tests et de leur configuration. |
 | `npm run check` | Enchaîner les contrôles locaux de types, lint, couverture et compilation. |
 | `npm run typecheck` | Vérifier les types TypeScript. |
@@ -121,5 +124,7 @@ Le projet utilise **React, TypeScript et Vite**, avec Tailwind CSS et Radix UI p
 Les composants du studio se trouvent dans `src/components/studio/`, le moteur dans `src/lib/`, les traitements en arrière-plan dans `src/workers/` et les thèmes dans `src/styles/` et `src/config/themes.ts`.
 
 Les tests sont regroupés dans [`tests/`](tests/README.md). Avant la première exécution navigateur, installez Chromium avec `npx playwright install chromium`. Les contrôles GitHub Actions et les propositions de mise à jour Dependabot sont décrits dans le [guide qualité GitHub](docs/github-quality.md).
+
+Le site est déployé sur **GitHub Pages** par le workflow `Deploy GitHub Pages` après chaque mise à jour de `main`, une fois ses contrôles réussis. Le [guide de déploiement](docs/github-pages.md) décrit la configuration et les services optionnels.
 
 Pour aller plus loin : [scénarios de test manuel](docs/manual-tests.md), [thèmes CryptoKeep](docs/themes.md) et [référence du design](docs/studio-redesign.md).

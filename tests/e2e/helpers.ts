@@ -52,7 +52,8 @@ export async function importImage(page: Page, name = 'quatre-couleurs.png') {
 export async function generateModel(page: Page) {
   await importImage(page);
   await page.getByRole('button', { name: "Analyser l'image", exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Analyse brute', exact: true })).toBeVisible();
+  // First-load worker startup can be slower on CI than an ordinary UI action.
+  await expect(page.getByRole('heading', { name: 'Analyse brute', exact: true })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText('Source :', { exact: false })).toContainText('96');
   await page.getByRole('button', { name: 'Appliquer les recommandations', exact: true }).click();
   await page.getByRole('button', { name: 'Générer ma création', exact: true }).click();

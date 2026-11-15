@@ -2,10 +2,10 @@ import { expect, test } from '@playwright/test';
 import JSZip from 'jszip';
 
 // Core studio regressions run without third-party availability or accidental remote calls.
-test.beforeEach(async ({ context }) => {
+test.beforeEach(async ({ context, baseURL }) => {
   await context.route('**/*', route => {
     const url = new URL(route.request().url());
-    return url.hostname === '127.0.0.1' && url.port === '4173'
+    return url.origin === new URL(baseURL!).origin
       ? route.continue()
       : route.abort('blockedbyclient');
   });
@@ -15,7 +15,7 @@ import { assertPng, downloadBytes, fourColorPng, generateModel, importImage } fr
 test('import, analyse, génération et exports réels PNG, ZIP et PDF', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('./', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'canvas to colors', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Générer ma création', exact: true })).toBeDisabled();
   await generateModel(page);
@@ -59,7 +59,7 @@ test('import, analyse, génération et exports réels PNG, ZIP et PDF', async ({
 });
 
 test('le projet enregistré conserve ses rendus après rechargement et réouverture', async ({ page }) => {
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('./', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'canvas to colors', exact: true })).toBeVisible();
   await generateModel(page);
   await page.getByRole('navigation', { name: 'Menu principal', exact: true }).getByRole('button', { name: 'Fichier', exact: true }).click();
@@ -76,7 +76,7 @@ test('le projet enregistré conserve ses rendus après rechargement et réouvert
 });
 
 test('les panneaux restent accessibles au clavier et les thèmes survivent au rechargement', async ({ page }) => {
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('./', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'canvas to colors', exact: true })).toBeVisible();
   const configuration = page.getByRole('complementary', { name: 'Configuration de génération', exact: true });
   const inspector = page.getByRole('complementary', { name: 'Inspecteur du document', exact: true });
@@ -99,7 +99,7 @@ test('les panneaux restent accessibles au clavier et les thèmes survivent au re
 
 test('sur écran étroit les commandes échangent les panneaux sans bloquer le plan de travail', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('./', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'canvas to colors', exact: true })).toBeVisible();
   const configuration = page.getByRole('complementary', { name: 'Configuration de génération', exact: true });
   const inspector = page.getByRole('complementary', { name: 'Inspecteur du document', exact: true });
@@ -121,7 +121,7 @@ for (const corrupt of [
   { name: 'tronque.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff]) },
 ]) {
   test(`un fichier ${corrupt.name} donne une erreur visible puis un nouvel import fonctionne`, async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.goto('./', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: 'canvas to colors', exact: true })).toBeVisible();
     const chooser = page.waitForEvent('filechooser');
     await page.getByRole('button', { name: 'Ouvrir une image', exact: true }).click();
@@ -136,7 +136,7 @@ for (const corrupt of [
 }
 
 test('remplacer une image invalide les résultats et impose une nouvelle analyse', async ({ page }) => {
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('./', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'canvas to colors', exact: true })).toBeVisible();
   await generateModel(page);
   const chooser = page.waitForEvent('filechooser');
@@ -151,7 +151,7 @@ test('remplacer une image invalide les résultats et impose une nouvelle analyse
 
 test('une image de 24 mégapixels est analysée à résolution bornée et génère un modèle', async ({ page }) => {
   test.setTimeout(90_000);
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('./', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'canvas to colors', exact: true })).toBeVisible();
   const chooser = page.waitForEvent('filechooser');
   await page.getByRole('button', { name: 'Ouvrir une image', exact: true }).click();
@@ -173,7 +173,7 @@ test('une image de 24 mégapixels est analysée à résolution bornée et génè
 test('un SVG est rasterisé sans exécuter son script puis analysé et généré', async ({ page }) => {
   const dialogs: string[] = [];
   page.on('dialog', async dialog => { dialogs.push(dialog.message()); await dialog.dismiss(); });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('./', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'canvas to colors', exact: true })).toBeVisible();
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" onload="alert('svg-onload')">
     <script>alert('svg-script')</script>
@@ -198,7 +198,7 @@ test('un SVG est rasterisé sans exécuter son script puis analysé et généré
 });
 
 test('le service IA indisponible propose une suggestion locale applicable', async ({ page }) => {
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('./', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'canvas to colors', exact: true })).toBeVisible();
   await importImage(page);
   await page.getByRole('button', { name: "Analyser l'image", exact: true }).click();
@@ -217,7 +217,7 @@ test('le service IA indisponible propose une suggestion locale applicable', asyn
 });
 
 test('l’effet peinture modifie réellement le PNG exporté et peut être désactivé', async ({ page }) => {
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto('./', { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'canvas to colors', exact: true })).toBeVisible();
   await generateModel(page);
   const originalDownload = page.waitForEvent('download');

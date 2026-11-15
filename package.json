@@ -17,7 +17,8 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:types": "tsc --noEmit -p tsconfig.tests.json",
-    "check": "npm run typecheck && npm run test:types && npm run lint && npm run test:coverage && npm run build"
+    "check": "npm run typecheck && npm run test:types && npm run lint && npm run test:coverage && npm run build",
+    "test:pages": "playwright test --config playwright.pages.config.ts"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.11",
