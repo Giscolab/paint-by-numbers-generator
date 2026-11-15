@@ -62,7 +62,7 @@
     "@lovable.dev/vite-plugin-hmr-gate": "^1.8.0",
     "@playwright/test": "^1.65.1",
     "@tailwindcss/typography": "^0.5.16",
-    "@types/node": "^22.16.5",
+    "@types/node": "^26.6.6",
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "^6.3.0",
