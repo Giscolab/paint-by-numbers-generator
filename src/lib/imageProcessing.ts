@@ -9,6 +9,7 @@ import { LRUCache } from './lruCache';
 import { createCanvasFactory, type Canvas2DContext } from './canvasFactory';
 import { analysisPipeline } from './analysisPipeline';
 import { renderPipeline } from './renderPipeline';
+import { decodeImageFile } from './imageDecode';
 import { processingCacheKey, imageFingerprint, quantizePerceptually, mergeSmallRegions, placeRegionLabels, validateModelParameters, flattenOnWhite, type LabelPlacement } from './pbnModel';
 
 // Image processing utilities for paint-by-numbers conversion
@@ -51,6 +52,8 @@ export interface ImageTypeInfo {
 }
 
 export interface ColorAnalysis {
+  sourceDimensions?: {width:number;height:number};
+  analyzedDimensions?: {width:number;height:number};
   uniqueColorsCount: number;
   dominantColors: string[]; // Top 10 couleurs
   dominantWeights: number[]; // Proportion de chaque couleur dominante
@@ -330,26 +333,11 @@ export async function analyzeImageColors(
     sourceType?: 'vector' | 'raster';
   }
 ): Promise<ColorAnalysis> {
-  if (typeof createImageBitmap !== 'function') {
-    throw new Error('createImageBitmap est indisponible pour une analyse brute.');
-  }
-
   const { onProgress, sourceType = 'raster' } = options ?? {};
-
-  let bitmap: ImageBitmap;
-  try {
-    bitmap = await createImageBitmap(imageSource, { imageOrientation: "from-image" } as ImageBitmapOptions);
-  } catch (error) {
-    console.warn("Impossible d'appliquer l'orientation EXIF, fallback brut.", error);
-    bitmap = await createImageBitmap(imageSource);
-  }
-
-  // === 1️⃣ Analyse brute : aucune mise à l'échelle ni normalisation ===
-  const { width, height } = bitmap;
-  const { ctx } = canvasFactory.createCanvas(width, height);
-  ctx.drawImage(bitmap, 0, 0);
-  const imageData = flattenOnWhite(ctx.getImageData(0, 0, width, height));
-  bitmap.close();
+  const decoded = await decodeImageFile(imageSource);
+  const imageData = flattenOnWhite(decoded.imageData);
+  const {width,height}=imageData;
+  onProgress?.(5);
 
   // === 2️⃣ Comptage précis (sans quantification ni échantillonnage) ===
   const totalPixels = imageData.width * imageData.height;
@@ -450,6 +438,8 @@ export async function analyzeImageColors(
   if (onProgress) onProgress(100);
 
   return {
+    sourceDimensions: {width:decoded.sourceWidth,height:decoded.sourceHeight},
+    analyzedDimensions: {width,height},
     uniqueColorsCount: uniqueCount,
     dominantColors,
     dominantWeights,

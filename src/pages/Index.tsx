@@ -12,7 +12,9 @@ import { EnhancedViewTabs } from "@/components/studio/EnhancedViewTabs";
 import { ExportBar } from "@/components/studio/ExportBar";
 import { DebugPanel } from "@/components/studio/DebugPanel";
 import { StudioProvider, useStudio } from "@/contexts/StudioContext";
-import { analyzeImageColors, getRecommendationsFromAnalysis } from "@/lib/imageProcessing";
+import { getRecommendationsFromAnalysis } from "@/lib/imageProcessing";
+import { analyzeImageWithWorker } from "@/lib/imageAnalysisWorker";
+import { validateImageInput } from "@/lib/imageDecode";
 import { processImageWithWorker } from "@/lib/imageProcessingWorker";
 import { resizeForDisplay } from "@/lib/imageNormalization";
 import { isSvgFile, rasterizeSvgFile } from "@/lib/svgImport";
@@ -45,6 +47,10 @@ function IndexContent() {
   const importInputRef = useRef<HTMLInputElement>(null);
   const documentRevision = useRef(0);
   const processingLock = useRef(false);
+  const analysisAbort = useRef<AbortController | null>(null);
+  const processingStageRef = useRef("");
+  const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [pipelineError, setPipelineError] = useState<{ operation: "import" | "analysis" | "generation"; message: string } | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null);
   const [showConfetti, setShowConfetti] = useState(false);
@@ -58,6 +64,7 @@ function IndexContent() {
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
 
   const { width = 0, height = 0 } = useWindowSize() ?? {};
+  useEffect(() => () => analysisAbort.current?.abort(), []);
 
   useEffect(() => () => {
     if (selectedImageUrl?.startsWith("blob:")) URL.revokeObjectURL(selectedImageUrl);
@@ -100,6 +107,9 @@ function IndexContent() {
 
   const resetImage = () => {
     if (processingLock.current) return;
+    analysisAbort.current?.abort();
+    setIsAnalyzing(false);
+    setPipelineError(null);
     documentRevision.current += 1;
     lastFileRef.current = null;
     setSelectedImageUrl(null);
@@ -116,10 +126,12 @@ function IndexContent() {
   // ========== IMAGE SELECTION ==========
   const handleImageSelect = async (file: File) => {
     if (processingLock.current) { toast.info("Patientez jusqu’à la fin de la génération avant de changer d’image."); return; }
-    if (file.size > IMAGE_PROCESSING.MAX_FILE_SIZE_BYTES || !file.type.startsWith('image/')) { toast.error("Choisissez une image de 20 Mo maximum."); return; }
+    analysisAbort.current?.abort();
     const revision = ++documentRevision.current;
     setIsImporting(true);
+    setPipelineError(null);
     try {
+      validateImageInput(file);
       const originalName = file.name;
       const isVectorSource = isSvgFile(file);
       let processingFile = file;
@@ -184,7 +196,9 @@ function IndexContent() {
       URL.revokeObjectURL(tempUrl);
     } catch (err) {
       console.error(err);
-      toast.error("Erreur lors du chargement de l'image");
+      const message = err instanceof Error ? err.message : "Impossible de lire cette image.";
+      setPipelineError({operation:"import",message});
+      toast.error("Échec de l’import", {description:message});
     } finally {
       if (revision === documentRevision.current) { setIsAnalyzing(false); setIsImporting(false); }
     }
@@ -201,8 +215,13 @@ function IndexContent() {
 
     try {
       setIsAnalyzing(true);
-      const analysis = await analyzeImageColors(file, {
-        onProgress: () => {},
+      setPipelineError(null);
+      setAnalysisProgress(0);
+      const controller = new AbortController();
+      analysisAbort.current = controller;
+      const analysis = await analyzeImageWithWorker(file, {
+        signal: controller.signal,
+        onProgress: setAnalysisProgress,
         sourceType: studio.currentProject?.sourceType ?? "raster",
       });
       if (revision !== documentRevision.current) return;
@@ -212,10 +231,13 @@ function IndexContent() {
       toast.success(`✨ ${analysis.uniqueColorsCount} couleurs détectées`);
       setShowAnalysisDialog(true);
     } catch (err) {
+      if (revision !== documentRevision.current || (err instanceof Error && err.name === "AbortError")) return;
       console.error(err);
-      toast.error("Erreur lors de l'analyse de l'image");
+      const message = err instanceof Error ? err.message : "L’analyse de cette image a échoué.";
+      setPipelineError({operation:"analysis",message});
+      toast.error("Échec de l’analyse", {description:message,duration:12000});
     } finally {
-      setIsAnalyzing(false);
+      if (revision === documentRevision.current) setIsAnalyzing(false);
     }
   };
 
@@ -236,6 +258,8 @@ function IndexContent() {
     }
 
     processingLock.current = true;
+    setPipelineError(null);
+    processingStageRef.current = "Initialisation";
     studio.setIsProcessing(true);
     setProcessingStage("Initialisation…");
     toast.info("Traitement de l'image en cours ⚡");
@@ -258,6 +282,7 @@ function IndexContent() {
         studio.settings.smoothness,
         studio.settings.mergeTolerance,
         (stage, progress) => {
+          processingStageRef.current = stage;
           setProcessingStage(stage);
           setProcessingProgress(progress);
           if (profilingActive) {
@@ -280,7 +305,12 @@ function IndexContent() {
       else toast.success("Modèle généré : chaque zone dispose d’un numéro lisible.");
     } catch (err) {
       console.error("Erreur de traitement :", err);
-      toast.error("Erreur lors du traitement de l'image");
+      const message = `${processingStageRef.current} : ${err instanceof Error ? err.message : "Erreur de traitement inconnue."}`;
+      setPipelineError({operation:"generation",message});
+      toast.error("Échec de la génération", {
+        description: message,
+        duration: 12000,
+      });
       if (profilingActive) clearHistory();
     } finally {
       if (profilingActive) endProfiling();
@@ -317,6 +347,7 @@ function IndexContent() {
 
       {/* === Layout principal === */}
       <StudioLayout
+        notice={pipelineError ? <div className="atelier-model-warning" role="alert"><strong>{pipelineError.operation === "analysis" ? "Analyse interrompue" : pipelineError.operation === "generation" ? "Génération interrompue" : "Import impossible"}</strong><p className="mt-1 break-words">{pipelineError.message}</p><div className="mt-2 flex gap-2">{pipelineError.operation !== "import" && <Button size="sm" variant="outline" onClick={pipelineError.operation === "analysis" ? handleAnalyze : handleProcess}>Réessayer</Button>}<Button size="sm" variant="ghost" onClick={()=>setPipelineError(null)}>Fermer le message</Button></div></div> : undefined}
         sourceImage={selectedImageUrl}
         onImport={() => importInputRef.current?.click()}
         configurationAction={<><p className="mb-3 text-[10px] text-muted-foreground">{studio.analysis ? "Votre prochaine création commence ici." : "Analysez votre image pour commencer."}</p><Button className="h-10 w-full gap-2 text-xs" onClick={handleProcess} disabled={studio.isProcessing || isImporting || isAnalyzing || !studio.analysis}>{studio.isProcessing ? "Création en cours…" : "Générer ma création"}</Button></>}
@@ -336,7 +367,7 @@ function IndexContent() {
                 onClick={handleAnalyze}
                 disabled={!selectedImageUrl || isAnalyzing || isImporting || studio.isProcessing}
               >
-                {isAnalyzing ? "Analyse en cours…" : "Analyser l'image"}
+                {isAnalyzing ? `Analyse en cours… ${Math.round(analysisProgress)} %` : "Analyser l'image"}
               </Button>
               {studio.analysis && (
                 <Button

@@ -1,6 +1,7 @@
 import { analyzeBruteSignal, type BruteSignalReport } from './bruteSignalAnalyzer';
 import { createCanvasFactory } from './canvasFactory';
 import { generateGrayscaleMap } from './imageProcessing';
+import { decodeImageFile } from './imageDecode';
 import { flattenOnWhite } from './pbnModel';
 
 export interface RawImageAnalysis {
@@ -119,24 +120,7 @@ export async function analysisPipeline(
       referenceImageData = imageFile;
     }
   } else {
-    const loadedImage = await loadImageSource(imageFile);
-    let width = loadedImage.width;
-    let height = loadedImage.height;
-
-    if (width > maxDim || height > maxDim) {
-      if (width > height) {
-        height = Math.max(1, Math.round((height * maxDim) / width));
-        width = maxDim;
-      } else {
-        width = Math.max(1, Math.round((width * maxDim) / height));
-        height = maxDim;
-      }
-    }
-
-    const { ctx } = canvasFactory.createCanvas(width, height);
-    ctx.drawImage(loadedImage.source, 0, 0, width, height);
-    referenceImageData = ctx.getImageData(0, 0, width, height);
-    loadedImage.cleanup?.();
+    referenceImageData = (await decodeImageFile(imageFile,maxDim)).imageData;
   }
 
   validateImageData(referenceImageData);

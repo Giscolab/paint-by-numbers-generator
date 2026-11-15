@@ -35,6 +35,50 @@ export interface RenderPipelineResult {
   artisticMergeStats?: ArtisticMergeStats;
 }
 
+
+/**
+ * Supprime les pixels isolés lorsque la segmentation d'une photographie est
+ * trop fragmentée. Une majorité locale ne remplace jamais une région dominante
+ * par une couleur différente sans au moins quatre voisins concordants.
+ */
+export function suppressColorSpeckles(
+  input: Uint16Array,
+  width: number,
+  height: number,
+): Uint16Array {
+  if (input.length !== width * height) throw new Error("Carte de couleurs invalide.");
+  const output = new Uint16Array(input);
+  const colors = new Uint16Array(9);
+  const counts = new Uint8Array(9);
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      let unique = 0;
+      let bestCount = 0;
+      let bestColor = input[y * width + x];
+      // Read from input; never depend on earlier pixels in this pass.
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const color = input[(y + dy) * width + x + dx];
+          let k = 0;
+          while (k < unique && colors[k] !== color) k++;
+          if (k === unique) {
+            colors[unique] = color;
+            counts[unique] = 0;
+            unique++;
+          }
+          const count = ++counts[k];
+          if (count > bestCount) {
+            bestCount = count;
+            bestColor = color;
+          }
+        }
+      }
+      if (bestCount >= 4) output[y * width + x] = bestColor;
+    }
+  }
+  return output;
+}
+
 export function renderPipeline(
   raw: RawImageAnalysis,
   options: RenderPipelineOptions
@@ -150,9 +194,21 @@ export function renderPipeline(
   // === STEP 3: Connected components ===
   report("Segmentation des zones", 48, "Étiquetage des composantes connexes");
   const segmentationStart = Date.now();
-  const { labels: initialLabels, zones: initialZones } =
-    labelConnectedComponents(Array.from(newColorMap), width, height);
-  if (initialZones.length > 100000) throw new Error("Image trop fragmentée. Réduisez le nombre de couleurs ou la résolution.");
+  let segmentationMap: Uint16Array<ArrayBufferLike> = newColorMap;
+  let initialComponents = labelConnectedComponents(Array.from(segmentationMap), width, height);
+  const MAX_INITIAL_ZONES = 100000;
+  for (let pass = 1; initialComponents.zones.length > MAX_INITIAL_ZONES && pass <= 3; pass++) {
+    report("Simplification des micro-zones", 49 + pass, `${initialComponents.zones.length} régions — passe ${pass}/3`);
+    segmentationMap = suppressColorSpeckles(segmentationMap, width, height);
+    initialComponents = labelConnectedComponents(Array.from(segmentationMap), width, height);
+  }
+  if (initialComponents.zones.length > MAX_INITIAL_ZONES) {
+    throw new Error(
+      `Image encore trop fragmentée (${initialComponents.zones.length} zones). ` +
+      "Essayez 16 couleurs ou une image légèrement réduite."
+    );
+  }
+  const { labels: initialLabels, zones: initialZones } = initialComponents;
   report(
     "Segmentation terminée",
     52,

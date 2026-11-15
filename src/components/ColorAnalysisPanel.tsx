@@ -146,6 +146,13 @@ export function ColorAnalysisPanel({
       </CardHeader>
 
       <CardContent className="space-y-2 p-2">
+        {analysis.sourceDimensions && analysis.analyzedDimensions && (
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Source : {analysis.sourceDimensions.width} × {analysis.sourceDimensions.height} px.
+            Analyse : {analysis.analyzedDimensions.width} × {analysis.analyzedDimensions.height} px.
+            {analysis.bruteSignal?.spectralDimensions && <> Calcul spectral : {analysis.bruteSignal.spectralDimensions.width} × {analysis.bruteSignal.spectralDimensions.height} px.</>}
+          </p>
+        )}
         {/* Mesures */}
         <div>
           <Label className="text-[11px] text-muted-foreground">Mesures</Label>

@@ -4,6 +4,7 @@
 
 import { ProcessedResult } from './imageProcessing';
 import { validateModelParameters } from './pbnModel';
+import { validateImageInput } from './imageDecode';
 import { IMAGE_PROCESSING } from '@/config/constants';
 
 const WORKER_BASE_TIMEOUT = IMAGE_PROCESSING.WORKER_TIMEOUT_MS;
@@ -16,18 +17,7 @@ const VALID_MESSAGE_TYPES = ['success', 'progress', 'error', 'done'];
  * Validate image file before processing
  */
 function validateImageFile(imageFile: File): void {
-  // Check file size
-  if (imageFile.size > IMAGE_PROCESSING.MAX_FILE_SIZE_BYTES) {
-    throw new Error(
-      `Image trop volumineuse : ${(imageFile.size / (1024 * 1024)).toFixed(1)} MB. ` +
-      `Maximum autorisé : ${IMAGE_PROCESSING.MAX_FILE_SIZE_MB} MB`
-    );
-  }
-
-  // Check file type
-  if (!imageFile.type.startsWith('image/')) {
-    throw new Error('Le fichier doit être une image');
-  }
+  validateImageInput(imageFile);
 }
 
 export class ImageProcessingWorker {

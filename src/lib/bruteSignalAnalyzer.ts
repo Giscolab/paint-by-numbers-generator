@@ -1,3 +1,5 @@
+import { reduceSignalChannels } from './signalSampling';
+
 /**
  * BruteImageSignalAnalyzer — Port TypeScript du script Python
  *
@@ -65,6 +67,7 @@ export interface BruteSignalReport {
   gradient: Record<string, GradientStats>;
   correlation: Record<string, number>;
   spectralHeatmap?: SpectralHeatmap;
+  spectralDimensions?: {width:number;height:number};
 }
 
 // ===================== WORKER SINGLETON =====================
@@ -83,11 +86,6 @@ function getSpectralWorker(): Worker {
   if (workerIdleTimeout !== null) {
     clearTimeout(workerIdleTimeout);
   }
-  workerIdleTimeout = setTimeout(() => {
-    spectralWorker?.terminate();
-    spectralWorker = null;
-    workerIdleTimeout = null;
-  }, 60_000);
   return spectralWorker;
 }
 
@@ -106,35 +104,33 @@ function runSpectralWorker(
 
   return new Promise((resolve, reject) => {
     const worker = getSpectralWorker();
-    const timeout = setTimeout(() => {
-      reject(new Error('FFT Worker timeout (2 min)'));
-    }, 120_000);
-
-    const handler = (e: MessageEvent) => {
+    const timeout = setTimeout(() => finish(undefined, new Error('Le calcul spectral a dépassé son délai.')), 20000);
+    let settled = false;
+    const finish = (value?: { spectral: Record<string, SpectralEnergy>; heatmap?: SpectralHeatmap }, error?: Error) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timeout);
       worker.removeEventListener('message', handler);
-      if (e.data.type === 'result') {
-        let heatmap: SpectralHeatmap | undefined;
-        if (e.data.heatmap) {
-          heatmap = {
-            width: e.data.heatmap.width,
-            height: e.data.heatmap.height,
-            data: new Uint8Array(e.data.heatmap.data),
-          };
-        }
-        resolve({ spectral: e.data.spectral, heatmap });
+      worker.removeEventListener('error', failed);
+      if (error) {
+        worker.terminate();
+        if (spectralWorker === worker) spectralWorker = null;
+        reject(error);
       } else {
-        reject(new Error(e.data.error || 'FFT Worker error'));
+        workerIdleTimeout = setTimeout(() => { if (spectralWorker === worker) {worker.terminate();spectralWorker = null;} workerIdleTimeout = null; }, 60000);
+        resolve(value!);
       }
     };
-
-    worker.addEventListener('message', handler);
-
-    const buffers = channels.map(ch => ch.buffer.slice(0));
-    worker.postMessage(
-      { type: 'computeSpectral', channels: buffers, width, height },
-      buffers
-    );
+    const handler = (event: MessageEvent) => {
+      if (event.data.type !== 'result') { finish(undefined,new Error(event.data.error || 'Erreur du calcul spectral.')); return; }
+      const heatmap = event.data.heatmap ? {width:event.data.heatmap.width,height:event.data.heatmap.height,data:new Uint8Array(event.data.heatmap.data)} : undefined;
+      finish({spectral:event.data.spectral,heatmap});
+    };
+    const failed = (event: ErrorEvent) => finish(undefined,new Error(event.message || 'Le Worker spectral est indisponible.'));
+    worker.addEventListener('message',handler);
+    worker.addEventListener('error',failed);
+    try {const buffers=channels.map(channel=>channel.buffer.slice(0));worker.postMessage({type:'computeSpectral',channels:buffers,width,height},buffers);}
+    catch(error) {finish(undefined,error instanceof Error?error:new Error('Impossible de lancer le calcul spectral.'));}
   });
 }
 
@@ -215,18 +211,19 @@ export async function analyzeBruteSignal(imageData: ImageData): Promise<BruteSig
   }
 
   // 4. Spectral (async via Worker)
+  const spectralSource = reduceSignalChannels(channels,width,height);
   let spectral: Record<string, SpectralEnergy>;
   let spectralHeatmap: SpectralHeatmap | undefined;
   try {
-    const result = await computeSpectralViaWorker(channels, width, height);
+    const result = await computeSpectralViaWorker(spectralSource.channels, spectralSource.width, spectralSource.height);
     spectral = result.spectral;
     spectralHeatmap = result.heatmap;
   } catch (err) {
     console.warn("[BruteSignal] FFT Worker failed, falling back to sync:", err);
-    spectral = computeSpectralSync(channels, width, height);
+    spectral = computeSpectralSync(spectralSource.channels, spectralSource.width, spectralSource.height);
   }
 
-  return { physical, statistics, entropy, spectral, gradient, correlation, spectralHeatmap };
+  return { physical, statistics, entropy, spectral, gradient, correlation, spectralHeatmap, spectralDimensions:{width:spectralSource.width,height:spectralSource.height} };
 }
 
 // ===================== SYNC FALLBACK FFT =====================

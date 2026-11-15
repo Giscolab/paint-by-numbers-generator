@@ -6,11 +6,12 @@ import { cn } from "@/lib/utils";
 
 interface StudioImageInfo { width?: number | null; height?: number | null; zoomPercent?: number | null; colorSpace?: string | null; bitDepth?: number | null; }
 interface StudioLayoutProps {
+  notice?: ReactNode;
   leftPanel: ReactNode; centerPanel: ReactNode; rightPanel?: ReactNode; bottomBar?: ReactNode;
   configurationAction?: ReactNode; imageInfo?: StudioImageInfo; className?: string; sourceImage?: string | null; onImport?: () => void;
 }
 
-export function StudioLayout({ leftPanel, centerPanel, rightPanel, bottomBar, imageInfo, className, sourceImage, onImport, configurationAction }: StudioLayoutProps) {
+export function StudioLayout({ leftPanel, centerPanel, rightPanel, bottomBar, imageInfo, className, sourceImage, onImport, configurationAction, notice }: StudioLayoutProps) {
   const studio = useStudio();
   const [leftOpen, setLeftOpen] = useState(() => window.innerWidth >= 640);
   const [rightOpen, setRightOpen] = useState(() => window.innerWidth >= 960);
@@ -56,6 +57,7 @@ export function StudioLayout({ leftPanel, centerPanel, rightPanel, bottomBar, im
         <div className="atelier-generation-action">{configurationAction}</div>
       </aside>}
       <main aria-label="Plan de travail" className="atelier-workspace">
+        {notice}
     {result?.metadata?.unnumberedZoneCount ? <div className="atelier-model-warning" role="status">{result.metadata.unnumberedZoneCount} zone(s) trop fines pour un numéro lisible. Augmentez la fusion des petites zones avant impression.</div> : null}
 
         <div className="atelier-workspace-caption"><span><span className="atelier-ready-dot"/>PLAN DE TRAVAIL 01</span><span>{imageInfo?.colorSpace ?? "sRGB"} · {imageInfo?.bitDepth ?? 8} bits</span></div>
